@@ -9,11 +9,18 @@ import type {
 const ORG = "uichat-mira";
 const API = "https://api.github.com";
 
-const headers = {
-  Accept: "application/vnd.github+json",
-  "User-Agent": "uichat-mira-control-room",
-  "X-GitHub-Api-Version": "2022-11-28",
-};
+export interface GitHubEnv {
+  GITHUB_READ_TOKEN?: string;
+}
+
+function headers(env: GitHubEnv) {
+  return {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "uichat-mira-control-room",
+    "X-GitHub-Api-Version": "2022-11-28",
+    ...(env.GITHUB_READ_TOKEN ? { Authorization: `Bearer ${env.GITHUB_READ_TOKEN}` } : {}),
+  };
+}
 
 interface GitHubOrg {
   login: string;
@@ -61,11 +68,12 @@ export interface GitHubSnapshot {
   status: "connected" | "degraded";
   organization: OrganizationSnapshot["organization"];
   repositories: OrganizationRepository[];
+  authenticated: boolean;
   error?: string;
 }
 
-async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${API}${path}`, { headers });
+async function request<T>(env: GitHubEnv, path: string): Promise<T> {
+  const response = await fetch(`${API}${path}`, { headers: headers(env) });
   if (!response.ok) {
     const remaining = response.headers.get("x-ratelimit-remaining");
     const reset = response.headers.get("x-ratelimit-reset");
@@ -76,14 +84,14 @@ async function request<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function optional<T>(path: string): Promise<T | null> {
-  const response = await fetch(`${API}${path}`, { headers });
+async function optional<T>(env: GitHubEnv, path: string): Promise<T | null> {
+  const response = await fetch(`${API}${path}`, { headers: headers(env) });
   if (response.status === 404) return null;
   if (!response.ok) return null;
   return response.json() as Promise<T>;
 }
 
-async function activity(repo: GitHubRepo): Promise<{
+async function activity(env: GitHubEnv, repo: GitHubRepo): Promise<{
   latestWorkflow: RepositoryWorkflow | null;
   latestRelease: RepositoryRelease | null;
 }> {
@@ -95,9 +103,10 @@ async function activity(repo: GitHubRepo): Promise<{
   const branch = encodeURIComponent(repo.default_branch);
   const [workflows, release] = await Promise.all([
     optional<{ workflow_runs: GitHubWorkflowRun[] }>(
+      env,
       `/repos/${ORG}/${repoName}/actions/runs?branch=${branch}&per_page=1`,
     ),
-    optional<GitHubRelease>(`/repos/${ORG}/${repoName}/releases/latest`),
+    optional<GitHubRelease>(env, `/repos/${ORG}/${repoName}/releases/latest`),
   ]);
 
   const run = workflows?.workflow_runs[0] ?? null;
@@ -123,16 +132,19 @@ async function activity(repo: GitHubRepo): Promise<{
   };
 }
 
-export async function getGitHubSnapshot(): Promise<GitHubSnapshot> {
+export async function getGitHubSnapshot(env: GitHubEnv = {}): Promise<GitHubSnapshot> {
+  const authenticated = Boolean(env.GITHUB_READ_TOKEN);
+
   try {
     const [organization, repositories] = await Promise.all([
-      request<GitHubOrg>(`/orgs/${ORG}`),
-      request<GitHubRepo[]>(`/orgs/${ORG}/repos?type=public&sort=updated&direction=desc&per_page=100`),
+      request<GitHubOrg>(env, `/orgs/${ORG}`),
+      request<GitHubRepo[]>(env, `/orgs/${ORG}/repos?type=public&sort=updated&direction=desc&per_page=100`),
     ]);
-    const activities = await Promise.all(repositories.map(activity));
+    const activities = await Promise.all(repositories.map((repo) => activity(env, repo)));
 
     return {
       status: "connected",
+      authenticated,
       organization: {
         login: organization.login,
         name: organization.name,
@@ -163,6 +175,7 @@ export async function getGitHubSnapshot(): Promise<GitHubSnapshot> {
   } catch (error) {
     return {
       status: "degraded",
+      authenticated,
       organization: {
         login: ORG,
         name: null,
