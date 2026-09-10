@@ -123,3 +123,5 @@ npm run build
 ## Deploy
 
 Production deployment is owned by `.github/workflows/deploy.yml` on the `prod` branch.
+
+Worker: `uichat-mira-control-room`
