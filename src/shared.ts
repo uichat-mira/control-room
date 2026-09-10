@@ -28,6 +28,14 @@ export interface RepositoryRelease {
   publishedAt: string | null;
 }
 
+export interface RepositoryGovernance {
+  status: "connected" | "partial";
+  openIssues: number | null;
+  openPullRequests: number | null;
+  defaultBranchProtected: boolean | null;
+  activeRulesets: number | null;
+}
+
 export interface OrganizationRepository {
   name: string;
   fullName: string;
@@ -44,6 +52,27 @@ export interface OrganizationRepository {
   stars: number;
   latestWorkflow: RepositoryWorkflow | null;
   latestRelease: RepositoryRelease | null;
+  governance?: RepositoryGovernance;
+}
+
+export interface GitHubProjectSummary {
+  number: number;
+  title: string;
+  url: string;
+  closed: boolean;
+  shortDescription: string | null;
+  updatedAt: string;
+  itemCount: number;
+}
+
+export interface GitHubOrganizationObservability {
+  authenticated: boolean;
+  governanceStatus: "connected" | "partial";
+  projects: {
+    status: "connected" | "unavailable";
+    items: GitHubProjectSummary[];
+    error?: string;
+  };
 }
 
 export interface ServiceProbe {
@@ -73,6 +102,7 @@ export interface OrganizationSnapshot {
     cloudflare: CloudflareSourceStatus;
   };
   repositories: OrganizationRepository[];
+  github?: GitHubOrganizationObservability;
   services: ServiceProbe[];
   cloudflare: CloudflareSnapshot;
   deployedCommit: string | null;
