@@ -1,3 +1,4 @@
+import { handleAiReviewRequest, type AiReviewEnv } from "./ai-review";
 import { handleMcpRequest } from "./mcp";
 import app from "./worker";
 
@@ -7,10 +8,11 @@ type RateLimitBinding = {
   limit(options: { key: string }): Promise<{ success: boolean }>;
 };
 
-type Env = BaseEnv & {
-  API_RATE_LIMITER?: RateLimitBinding;
-  HEALTH_RATE_LIMITER?: RateLimitBinding;
-};
+type Env = BaseEnv &
+  AiReviewEnv & {
+    API_RATE_LIMITER?: RateLimitBinding;
+    HEALTH_RATE_LIMITER?: RateLimitBinding;
+  };
 
 const API_LIMIT_PER_MINUTE = 30;
 const HEALTH_LIMIT_PER_MINUTE = 120;
@@ -108,6 +110,7 @@ export default {
     const { pathname } = new URL(request.url);
     const apiRoute = pathname.startsWith("/api/");
     const mcpRoute = pathname === "/mcp";
+    const aiReviewRoute = pathname.startsWith("/api/v1/ai-review/");
 
     if (!apiRoute && !mcpRoute) {
       return app.fetch(request, env);
@@ -119,6 +122,7 @@ export default {
     }
 
     if (request.method === "OPTIONS") {
+      if (aiReviewRoute) return handleAiReviewRequest(request, env);
       if (apiRoute) return app.fetch(request, env);
       return new Response(null, {
         status: 204,
@@ -130,20 +134,25 @@ export default {
       });
     }
 
-    const healthRoute = pathname === "/api/health" || pathname === "/api/v1/health";
+    const healthRoute =
+      pathname === "/api/health" ||
+      pathname === "/api/v1/health" ||
+      pathname === "/api/v1/ai-review/health";
     const limit = healthRoute ? HEALTH_LIMIT_PER_MINUTE : API_LIMIT_PER_MINUTE;
     const limiter = healthRoute ? env.HEALTH_RATE_LIMITER : env.API_RATE_LIMITER;
     const key = healthRoute
       ? `${clientKey(request)}:health`
-      : `${clientKey(request)}:public-read`;
+      : `${clientKey(request)}:${aiReviewRoute ? "ai-review" : "public-read"}`;
 
     if (!(await isAllowed(limiter, key))) {
       return tooManyRequests(limit);
     }
 
-    const response = mcpRoute
-      ? await handleMcpRequest(request, env)
-      : await app.fetch(request, env);
+    const response = aiReviewRoute
+      ? await handleAiReviewRequest(request, env)
+      : mcpRoute
+        ? await handleMcpRequest(request, env)
+        : await app.fetch(request, env);
     return withPolicyHeader(response, limit);
   },
 };
