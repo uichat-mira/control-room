@@ -7,6 +7,7 @@ Control Room is a **read-only projection** of existing sources of truth. It must
 ## V0.2
 
 - React + Vite cockpit UI
+- Shallow domain navigation for Overview, Engineering, Runtime, and Governance
 - Cloudflare Worker API + Workers Static Assets
 - Live GitHub organization repository data
 - Latest default-branch GitHub Actions run per repository
@@ -20,7 +21,7 @@ Control Room is a **read-only projection** of existing sources of truth. It must
 - Human-readable API/MCP docs at `/docs`
 - `/wall` large-screen mode with 60-second refresh
 
-GitHub, Cloudflare, governance, and runtime health are intentionally separate read paths. Focused Public API and MCP reads do not trigger unrelated service probes.
+GitHub, Cloudflare, governance, and runtime health are intentionally separate read paths. Focused Public API, MCP, and domain UI reads do not trigger unrelated service probes. Overview is the deliberate cross-domain exception because its job is to answer what needs attention now.
 
 ## Public API v1
 
@@ -92,9 +93,14 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 
 ## Views
 
-- `/` — full Control Room
-- `/wall` — large-screen operations view; forced dark theme and no repository detail table
+- `/` — Overview: cross-domain summary, current exceptions, and the active public Project
+- `/engineering` — repositories, latest default-branch builds, releases, Workers, and Pages delivery
+- `/runtime` — live service probes, Workers, Pages, and 24-hour traffic/error analytics
+- `/governance` — Issues, pull requests, default-branch protection, rulesets, and public Projects
+- `/wall` — large-screen operations view; forced dark theme and 60-second refresh
 - `/docs` — public API and MCP documentation
+
+The UI is intentionally split by operational question rather than by raw data table. Engineering, Runtime, and Governance use focused `/api/v1/*` reads; only Overview and Wall use the cross-domain summary.
 
 ## Local development
 

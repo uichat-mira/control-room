@@ -4,6 +4,7 @@ import "./styles.css";
 import "./ops.css";
 import "./governance.css";
 import "./visual.css";
+import "./navigation.css";
 
 const root = createRoot(document.getElementById("root")!);
 
