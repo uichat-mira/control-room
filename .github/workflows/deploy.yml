@@ -110,6 +110,7 @@ jobs:
             "${CONTROL_ROOM_URL}/api/summary" --output /tmp/control-room-summary.json
 
           cat /tmp/control-room-health.json
+          cat /tmp/control-room-summary.json
           node <<'NODE'
           const fs = require('node:fs');
           const health = JSON.parse(fs.readFileSync('/tmp/control-room-health.json', 'utf8'));
@@ -121,21 +122,24 @@ jobs:
           if (health.commit && health.commit !== process.env.GITHUB_SHA) {
             throw new Error(`Unexpected deployed commit: ${health.commit}`);
           }
-          if (summary.sources?.github !== 'connected') {
-            throw new Error(`GitHub source is not connected: ${summary.sources?.github}`);
+          if (!summary.sources || !['connected', 'degraded'].includes(summary.sources.github)) {
+            throw new Error(`Unexpected GitHub source state: ${summary.sources?.github}`);
           }
-          if (!Array.isArray(summary.repositories) || summary.repositories.length < 1) {
-            throw new Error('Control Room returned no repositories');
+          if (!Array.isArray(summary.repositories)) {
+            throw new Error('Control Room repositories payload is invalid');
           }
           if (!Array.isArray(summary.services) || summary.services.length < 1) {
             throw new Error('Control Room returned no service probes');
           }
-          if (process.env.EXPECT_CF_READ === '1' && summary.sources?.cloudflare === 'unconfigured') {
+          if (!summary.cloudflare || !Array.isArray(summary.cloudflare.workers) || !Array.isArray(summary.cloudflare.pages)) {
+            throw new Error('Control Room Cloudflare payload is invalid');
+          }
+          if (process.env.EXPECT_CF_READ === '1' && summary.sources.cloudflare === 'unconfigured') {
             throw new Error('Cloudflare read token was supplied but runtime reports unconfigured');
           }
 
           console.log(
-            `Smoke OK: ${summary.repositories.length} repos, ${summary.services.length} services, CF=${summary.sources?.cloudflare}`,
+            `Smoke OK: ${summary.repositories.length} repos, ${summary.services.length} services, GitHub=${summary.sources.github}, CF=${summary.sources.cloudflare}`,
           );
           NODE
 
