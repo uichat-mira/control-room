@@ -17,6 +17,7 @@ Control Room is a **read-only projection** of existing sources of truth. It must
 - Public repository governance and public GitHub Projects projection
 - Versioned Public API v1 + OpenAPI 3.1 contract
 - Remote read-only MCP endpoint
+- Human-readable API/MCP docs at `/docs`
 - `/wall` large-screen mode with 60-second refresh
 
 GitHub, Cloudflare, governance, and runtime health are intentionally separate read paths. Focused Public API and MCP reads do not trigger unrelated service probes.
@@ -36,6 +37,7 @@ Control Room exposes a versioned, read-only, public-safe API. It only projects p
 - `GET /api/v1/governance` — Issues / PR / branch protection / rulesets / Projects
 - `GET /api/v1/projects` — public GitHub Projects
 - `GET /openapi.json` — OpenAPI 3.1 contract
+- `GET /docs` — human-readable API/MCP documentation
 
 The v1 API allows cross-origin `GET` requests with `Access-Control-Allow-Origin: *`. Responses are cache-friendly and carry `x-mira-api-version: v1`.
 
@@ -58,7 +60,7 @@ The MCP surface is deliberately small and task-oriented:
 - `inspect_runtime` — services / analytics
 - `inspect_governance` — governance / projects
 
-MCP reuses the Public API read model internally; it does not query GitHub or Cloudflare through a second implementation. See [`docs/MCP.md`](docs/MCP.md).
+MCP reuses the Public API read model internally; it does not query GitHub or Cloudflare through a second implementation. See [`docs/MCP.md`](docs/MCP.md), or open `/docs` on the deployed Control Room.
 
 ## Abuse protection
 
@@ -92,6 +94,7 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 
 - `/` — full Control Room
 - `/wall` — large-screen operations view; forced dark theme and no repository detail table
+- `/docs` — public API and MCP documentation
 
 ## Local development
 
