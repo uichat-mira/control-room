@@ -1,3 +1,4 @@
+import { getCloudflareSnapshot, type CloudflareEnv, type CloudflareSnapshot } from "./cloudflare";
 import type {
   OrganizationRepository,
   OrganizationSnapshot,
@@ -9,14 +10,28 @@ import type {
 
 const ORG = "uichat-mira";
 const GITHUB_API = "https://api.github.com";
-const SNAPSHOT_TTL_SECONDS = 15 * 60;
+const CORE_TTL_SECONDS = 15 * 60;
+
+interface Env extends CloudflareEnv {
+  DEPLOYED_COMMIT?: string;
+}
+
+interface CoreSnapshot {
+  generatedAt: string;
+  organization: OrganizationSnapshot["organization"];
+  sources: OrganizationSnapshot["sources"];
+  repositories: OrganizationRepository[];
+  cloudflare: CloudflareSnapshot;
+  deployedCommit: string | null;
+  error?: string;
+}
 
 const json = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body, null, 2), {
     ...init,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": "public, max-age=30, s-maxage=60",
+      "cache-control": "no-store",
       ...init.headers,
     },
   });
@@ -102,7 +117,7 @@ async function repositoryActivity(repo: GitHubRepo): Promise<{
   latestWorkflow: RepositoryWorkflow | null;
   latestRelease: RepositoryRelease | null;
 }> {
-  const encodedRepo = repo.name.split("/").map(encodeURIComponent).join("/");
+  const encodedRepo = encodeURIComponent(repo.name);
   const branch = encodeURIComponent(repo.default_branch);
 
   const [workflowPayload, releasePayload] = await Promise.all([
@@ -210,19 +225,22 @@ async function serviceSnapshot(): Promise<ServiceProbe[]> {
   ]);
 }
 
-async function organizationSnapshot(): Promise<OrganizationSnapshot> {
+async function coreSnapshot(env: Env): Promise<CoreSnapshot> {
   const generatedAt = new Date().toISOString();
+  const cloudflarePromise = getCloudflareSnapshot(env);
 
   try {
-    const [organization, repositories, services] = await Promise.all([
+    const [organization, repositories] = await Promise.all([
       github<GitHubOrg>(`/orgs/${ORG}`),
       github<GitHubRepo[]>(
         `/orgs/${ORG}/repos?type=public&sort=updated&direction=desc&per_page=100`,
       ),
-      serviceSnapshot(),
     ]);
 
-    const activity = await Promise.all(repositories.map(repositoryActivity));
+    const [activity, cloudflare] = await Promise.all([
+      Promise.all(repositories.map(repositoryActivity)),
+      cloudflarePromise,
+    ]);
 
     const normalizedRepositories: OrganizationRepository[] = repositories.map((repo, index) => ({
       name: repo.name,
@@ -242,17 +260,7 @@ async function organizationSnapshot(): Promise<OrganizationSnapshot> {
       latestRelease: activity[index]?.latestRelease ?? null,
     }));
 
-    const hasFailedBuild = normalizedRepositories.some((repo) => {
-      const run = repo.latestWorkflow;
-      if (!run || run.status !== "completed") return false;
-      return ["failure", "timed_out", "action_required", "startup_failure"].includes(
-        run.conclusion ?? "",
-      );
-    });
-    const hasOfflineService = services.some((service) => service.status === "offline");
-
     return {
-      status: hasFailedBuild || hasOfflineService ? "degraded" : "connected",
       generatedAt,
       organization: {
         login: organization.login,
@@ -265,14 +273,15 @@ async function organizationSnapshot(): Promise<OrganizationSnapshot> {
       },
       sources: {
         github: "connected",
-        cloudflare: "pending",
+        cloudflare: cloudflare.status,
       },
       repositories: normalizedRepositories,
-      services,
+      cloudflare,
+      deployedCommit: env.DEPLOYED_COMMIT ?? null,
     };
   } catch (error) {
+    const cloudflare = await cloudflarePromise;
     return {
-      status: "degraded",
       generatedAt,
       organization: {
         login: ORG,
@@ -285,46 +294,71 @@ async function organizationSnapshot(): Promise<OrganizationSnapshot> {
       },
       sources: {
         github: "degraded",
-        cloudflare: "pending",
+        cloudflare: cloudflare.status,
       },
       repositories: [],
-      services: await serviceSnapshot(),
+      cloudflare,
+      deployedCommit: env.DEPLOYED_COMMIT ?? null,
       error: error instanceof Error ? error.message : "GitHub organization data unavailable",
     };
   }
 }
 
-async function cachedSnapshot(request: Request): Promise<Response> {
+async function cachedCoreSnapshot(request: Request, env: Env): Promise<CoreSnapshot> {
   const workerCaches = caches as CacheStorage & { default: Cache };
   const edgeCache = workerCaches.default;
   const url = new URL(request.url);
-  const cacheKey = new Request(`${url.origin}/api/__snapshot-cache`, { method: "GET" });
+  const cacheKey = new Request(`${url.origin}/api/__core-cache-v2`, { method: "GET" });
   const cached = await edgeCache.match(cacheKey);
 
-  if (cached) {
-    const response = new Response(cached.body, cached);
-    response.headers.set("x-mira-cache", "HIT");
-    return response;
-  }
+  if (cached) return cached.json() as Promise<CoreSnapshot>;
 
-  const snapshot = await organizationSnapshot();
-  const response = json(snapshot, {
-    status: snapshot.sources.github === "connected" ? 200 : 502,
-    headers: {
-      "cache-control": `public, max-age=60, s-maxage=${SNAPSHOT_TTL_SECONDS}`,
-      "x-mira-cache": "MISS",
-    },
-  });
-
+  const snapshot = await coreSnapshot(env);
   if (snapshot.sources.github === "connected") {
-    await edgeCache.put(cacheKey, response.clone());
+    await edgeCache.put(
+      cacheKey,
+      new Response(JSON.stringify(snapshot), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": `public, max-age=60, s-maxage=${CORE_TTL_SECONDS}`,
+        },
+      }),
+    );
   }
 
-  return response;
+  return snapshot;
+}
+
+function buildFailed(repositories: OrganizationRepository[]): boolean {
+  return repositories.some((repo) => {
+    const run = repo.latestWorkflow;
+    if (!run || run.status !== "completed") return false;
+    return ["failure", "timed_out", "action_required", "startup_failure"].includes(
+      run.conclusion ?? "",
+    );
+  });
+}
+
+async function organizationSnapshot(request: Request, env: Env): Promise<OrganizationSnapshot> {
+  const [core, services] = await Promise.all([cachedCoreSnapshot(request, env), serviceSnapshot()]);
+  const hasOfflineService = services.some((service) => service.status === "offline");
+  const cloudflareDegraded = core.sources.cloudflare === "degraded";
+
+  return {
+    ...core,
+    status:
+      core.sources.github === "degraded" ||
+      buildFailed(core.repositories) ||
+      hasOfflineService ||
+      cloudflareDegraded
+        ? "degraded"
+        : "connected",
+    services,
+  };
 }
 
 export default {
-  async fetch(request: Request): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/health") {
@@ -332,12 +366,14 @@ export default {
         ok: true,
         service: "mira-control-room",
         version: "0.2.0",
+        commit: env.DEPLOYED_COMMIT ?? null,
         now: new Date().toISOString(),
       });
     }
 
     if (url.pathname === "/api/organization" || url.pathname === "/api/summary") {
-      return cachedSnapshot(request);
+      const snapshot = await organizationSnapshot(request, env);
+      return json(snapshot, snapshot.sources.github === "connected" ? {} : { status: 502 });
     }
 
     if (url.pathname.startsWith("/api/")) {
