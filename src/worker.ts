@@ -4,17 +4,18 @@ import {
   getGitHubSnapshot,
   type GitHubEnv,
   type GitHubGovernanceSnapshot,
+  type GitHubSnapshot,
 } from "./github";
 import { openApiDocument } from "./openapi";
 import { getServiceSnapshot } from "./services";
 import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
 
-const AUTH_CORE_TTL_SECONDS = 15 * 60;
-const ANON_CORE_TTL_SECONDS = 30 * 60;
+const AUTH_GITHUB_TTL_SECONDS = 15 * 60;
+const ANON_GITHUB_TTL_SECONDS = 30 * 60;
 const GOVERNANCE_TTL_SECONDS = 30 * 60;
 const STALE_TTL_SECONDS = 24 * 60 * 60;
 const CLOUDFLARE_TTL_SECONDS = 5 * 60;
-const CORE_CACHE_SCHEMA = "v8";
+const GITHUB_CACHE_SCHEMA = "v9";
 const GOVERNANCE_CACHE_SCHEMA = "v2";
 const API_VERSION = "v1";
 
@@ -22,16 +23,9 @@ interface Env extends CloudflareEnv, GitHubEnv {
   DEPLOYED_COMMIT?: string;
 }
 
-interface CoreSnapshot {
+type GitHubCoreSnapshot = GitHubSnapshot & {
   generatedAt: string;
-  organization: OrganizationSnapshot["organization"];
-  sources: OrganizationSnapshot["sources"];
-  repositories: OrganizationRepository[];
-  github?: OrganizationSnapshot["github"];
-  cloudflare: CloudflareSnapshot;
-  deployedCommit: string | null;
-  error?: string;
-}
+};
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -69,11 +63,10 @@ function legacyHeaders(successor: string) {
   };
 }
 
-function coreCacheKeys(request: Request, env: Env) {
+function githubCacheKeys(request: Request, env: Env) {
   const url = new URL(request.url);
-  const cfState = env.CLOUDFLARE_READ_TOKEN ? "cf" : "no-cf";
   const ghState = env.GITHUB_READ_TOKEN ? "gh-auth" : "gh-anon";
-  const prefix = `${url.origin}/api/__core-${CORE_CACHE_SCHEMA}-${cfState}-${ghState}`;
+  const prefix = `${url.origin}/api/__github-${GITHUB_CACHE_SCHEMA}-${ghState}`;
   return {
     fresh: new Request(`${prefix}-fresh`, { method: "GET" }),
     stale: new Request(`${prefix}-stale`, { method: "GET" }),
@@ -127,78 +120,45 @@ async function cachedCloudflare(request: Request, env: Env): Promise<CloudflareS
   }
 }
 
-async function currentCore(request: Request, env: Env): Promise<CoreSnapshot> {
-  const generatedAt = new Date().toISOString();
-  const [github, cloudflare] = await Promise.all([
-    getGitHubSnapshot(env),
-    cachedCloudflare(request, env),
-  ]);
-
+async function currentGitHub(env: Env): Promise<GitHubCoreSnapshot> {
   return {
-    generatedAt,
-    organization: github.organization,
-    sources: {
-      github: github.status,
-      cloudflare: cloudflare.status,
-    },
-    repositories: github.repositories,
-    github: github.github,
-    cloudflare,
-    deployedCommit: env.DEPLOYED_COMMIT ?? null,
-    error: github.error,
+    ...(await getGitHubSnapshot(env)),
+    generatedAt: new Date().toISOString(),
   };
 }
 
-async function cachedCore(request: Request, env: Env): Promise<CoreSnapshot> {
-  const workerCaches = caches as CacheStorage & { default: Cache };
-  const edgeCache = workerCaches.default;
-  const keys = coreCacheKeys(request, env);
-  const cached = await edgeCache.match(keys.fresh);
-
-  if (cached) {
-    const [snapshot, cloudflare] = await Promise.all([
-      cached.json() as Promise<CoreSnapshot>,
-      cachedCloudflare(request, env),
-    ]);
-    return {
-      ...snapshot,
-      sources: { ...snapshot.sources, cloudflare: cloudflare.status },
-      cloudflare,
-      deployedCommit: env.DEPLOYED_COMMIT ?? null,
-    };
-  }
-
-  const next = await currentCore(request, env);
-  if (next.sources.github === "connected") {
-    const ttl = env.GITHUB_READ_TOKEN ? AUTH_CORE_TTL_SECONDS : ANON_CORE_TTL_SECONDS;
-    await Promise.all([
-      edgeCache.put(keys.fresh, cacheResponse(next, ttl)),
-      edgeCache.put(keys.stale, cacheResponse(next, STALE_TTL_SECONDS)),
-    ]);
-    return next;
-  }
-
-  const stale = await edgeCache.match(keys.stale);
-  if (!stale) return next;
-
-  const previous = (await stale.json()) as CoreSnapshot;
-  return {
-    ...previous,
-    sources: {
-      github: "degraded",
-      cloudflare: next.sources.cloudflare,
-    },
-    cloudflare: next.cloudflare,
-    deployedCommit: env.DEPLOYED_COMMIT ?? null,
-    error: next.error || "GitHub temporarily unavailable; showing last successful snapshot",
-  };
-}
-
-async function resilientCore(request: Request, env: Env): Promise<CoreSnapshot> {
+async function cachedGitHub(request: Request, env: Env): Promise<GitHubCoreSnapshot> {
   try {
-    return await cachedCore(request, env);
+    const workerCaches = caches as CacheStorage & { default: Cache };
+    const edgeCache = workerCaches.default;
+    const keys = githubCacheKeys(request, env);
+    const cached = await edgeCache.match(keys.fresh);
+    if (cached) return (await cached.json()) as GitHubCoreSnapshot;
+
+    const next = await currentGitHub(env);
+    if (next.status === "connected") {
+      const ttl = env.GITHUB_READ_TOKEN ? AUTH_GITHUB_TTL_SECONDS : ANON_GITHUB_TTL_SECONDS;
+      await Promise.all([
+        edgeCache.put(keys.fresh, cacheResponse(next, ttl)),
+        edgeCache.put(keys.stale, cacheResponse(next, STALE_TTL_SECONDS)),
+      ]);
+      return next;
+    }
+
+    const stale = await edgeCache.match(keys.stale);
+    if (!stale) return next;
+
+    const previous = (await stale.json()) as GitHubCoreSnapshot;
+    const authenticated = Boolean(env.GITHUB_READ_TOKEN);
+    return {
+      ...previous,
+      status: "degraded",
+      authenticated,
+      github: { ...previous.github, authenticated },
+      error: next.error || "GitHub temporarily unavailable; showing last successful snapshot",
+    };
   } catch {
-    return currentCore(request, env);
+    return currentGitHub(env);
   }
 }
 
@@ -253,19 +213,34 @@ function buildFailed(repositories: OrganizationRepository[]): boolean {
 }
 
 async function summary(request: Request, env: Env): Promise<OrganizationSnapshot> {
-  const [core, services] = await Promise.all([resilientCore(request, env), getServiceSnapshot()]);
+  const generatedAt = new Date().toISOString();
+  const [github, cloudflare, services] = await Promise.all([
+    cachedGitHub(request, env),
+    cachedCloudflare(request, env),
+    getServiceSnapshot(),
+  ]);
   const serviceIssue = services.some((service) => service.status !== "online");
-  const githubIssue = core.sources.github === "degraded";
+  const githubIssue = github.status === "degraded";
   const cloudflareIssue =
-    core.sources.cloudflare === "degraded" &&
-    core.cloudflare.workers.length === 0 &&
-    core.cloudflare.pages.length === 0;
+    cloudflare.status === "degraded" &&
+    cloudflare.workers.length === 0 &&
+    cloudflare.pages.length === 0;
 
   return {
-    ...core,
+    generatedAt,
+    organization: github.organization,
+    sources: {
+      github: github.status,
+      cloudflare: cloudflare.status,
+    },
+    repositories: github.repositories,
+    github: github.github,
+    cloudflare,
     services,
+    deployedCommit: env.DEPLOYED_COMMIT ?? null,
+    error: github.error,
     status:
-      githubIssue || cloudflareIssue || serviceIssue || buildFailed(core.repositories)
+      githubIssue || cloudflareIssue || serviceIssue || buildFailed(github.repositories)
         ? "degraded"
         : "connected",
   };
@@ -305,6 +280,10 @@ function v1Envelope<T extends object>(payload: T) {
   return { apiVersion: API_VERSION, ...payload };
 }
 
+function serviceStatus(services: Awaited<ReturnType<typeof getServiceSnapshot>>) {
+  return services.some((service) => service.status !== "online") ? "degraded" : "connected";
+}
+
 async function v1Route(request: Request, env: Env, pathname: string): Promise<Response | null> {
   if (pathname === "/api/v1") {
     return publicApiJson({
@@ -342,37 +321,51 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
     });
   }
 
-  if (["/api/v1/repos", "/api/v1/builds", "/api/v1/services", "/api/v1/deployments", "/api/v1/analytics"].includes(pathname)) {
-    const snapshot = await summary(request, env);
-
+  if (pathname === "/api/v1/repos" || pathname === "/api/v1/builds") {
+    const github = await cachedGitHub(request, env);
     if (pathname === "/api/v1/repos") {
-      return publicApiJson(v1Envelope({ generatedAt: snapshot.generatedAt, status: snapshot.status, items: snapshot.repositories }));
-    }
-    if (pathname === "/api/v1/builds") {
       return publicApiJson(v1Envelope({
-        generatedAt: snapshot.generatedAt,
-        status: snapshot.status,
-        items: snapshot.repositories.map((repo) => ({
-          repository: repo.fullName,
-          htmlUrl: repo.htmlUrl,
-          defaultBranch: repo.defaultBranch,
-          workflow: repo.latestWorkflow,
-          release: repo.latestRelease,
-        })),
+        generatedAt: github.generatedAt,
+        status: github.status,
+        items: github.repositories,
       }));
     }
-    if (pathname === "/api/v1/services") {
-      return publicApiJson(v1Envelope({ generatedAt: snapshot.generatedAt, status: snapshot.status, items: snapshot.services }));
-    }
+    return publicApiJson(v1Envelope({
+      generatedAt: github.generatedAt,
+      status: github.status,
+      items: github.repositories.map((repo) => ({
+        repository: repo.fullName,
+        htmlUrl: repo.htmlUrl,
+        defaultBranch: repo.defaultBranch,
+        workflow: repo.latestWorkflow,
+        release: repo.latestRelease,
+      })),
+    }));
+  }
+
+  if (pathname === "/api/v1/services") {
+    const services = await getServiceSnapshot();
+    return publicApiJson(v1Envelope({
+      generatedAt: new Date().toISOString(),
+      status: serviceStatus(services),
+      items: services,
+    }));
+  }
+
+  if (pathname === "/api/v1/deployments" || pathname === "/api/v1/analytics") {
+    const cloudflare = await cachedCloudflare(request, env);
     if (pathname === "/api/v1/deployments") {
       return publicApiJson(v1Envelope({
-        generatedAt: snapshot.generatedAt,
-        status: snapshot.cloudflare.status,
-        workers: snapshot.cloudflare.workers,
-        pages: snapshot.cloudflare.pages,
+        generatedAt: new Date().toISOString(),
+        status: cloudflare.status,
+        workers: cloudflare.workers,
+        pages: cloudflare.pages,
       }));
     }
-    return publicApiJson(v1Envelope({ generatedAt: snapshot.generatedAt, ...snapshot.cloudflare.analytics24h }));
+    return publicApiJson(v1Envelope({
+      generatedAt: new Date().toISOString(),
+      ...cloudflare.analytics24h,
+    }));
   }
 
   if (pathname === "/api/v1/governance" || pathname === "/api/v1/projects") {
