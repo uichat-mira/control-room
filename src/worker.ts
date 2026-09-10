@@ -1,14 +1,15 @@
 import { getCloudflareSnapshot, type CloudflareEnv, type CloudflareSnapshot } from "./cloudflare";
-import { getGitHubSnapshot } from "./github";
+import { getGitHubSnapshot, type GitHubEnv } from "./github";
 import { getServiceSnapshot } from "./services";
 import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
 
-const CORE_TTL_SECONDS = 15 * 60;
+const AUTH_CORE_TTL_SECONDS = 15 * 60;
+const ANON_CORE_TTL_SECONDS = 30 * 60;
 const STALE_TTL_SECONDS = 24 * 60 * 60;
 const CLOUDFLARE_TTL_SECONDS = 5 * 60;
-const CORE_CACHE_SCHEMA = "v5";
+const CORE_CACHE_SCHEMA = "v6";
 
-interface Env extends CloudflareEnv {
+interface Env extends CloudflareEnv, GitHubEnv {
   DEPLOYED_COMMIT?: string;
 }
 
@@ -34,8 +35,9 @@ const json = (body: unknown, init: ResponseInit = {}) =>
 
 function coreCacheKeys(request: Request, env: Env) {
   const url = new URL(request.url);
-  const configState = env.CLOUDFLARE_READ_TOKEN ? "cf" : "no-cf";
-  const prefix = `${url.origin}/api/__core-${CORE_CACHE_SCHEMA}-${configState}`;
+  const cfState = env.CLOUDFLARE_READ_TOKEN ? "cf" : "no-cf";
+  const ghState = env.GITHUB_READ_TOKEN ? "gh-auth" : "gh-anon";
+  const prefix = `${url.origin}/api/__core-${CORE_CACHE_SCHEMA}-${cfState}-${ghState}`;
   return {
     fresh: new Request(`${prefix}-fresh`, { method: "GET" }),
     stale: new Request(`${prefix}-stale`, { method: "GET" }),
@@ -78,7 +80,7 @@ async function cachedCloudflare(request: Request, env: Env): Promise<CloudflareS
 async function currentCore(request: Request, env: Env): Promise<CoreSnapshot> {
   const generatedAt = new Date().toISOString();
   const [github, cloudflare] = await Promise.all([
-    getGitHubSnapshot(),
+    getGitHubSnapshot(env),
     cachedCloudflare(request, env),
   ]);
 
@@ -117,8 +119,9 @@ async function cachedCore(request: Request, env: Env): Promise<CoreSnapshot> {
 
   const next = await currentCore(request, env);
   if (next.sources.github === "connected") {
+    const ttl = env.GITHUB_READ_TOKEN ? AUTH_CORE_TTL_SECONDS : ANON_CORE_TTL_SECONDS;
     await Promise.all([
-      edgeCache.put(keys.fresh, cacheResponse(next, CORE_TTL_SECONDS)),
+      edgeCache.put(keys.fresh, cacheResponse(next, ttl)),
       edgeCache.put(keys.stale, cacheResponse(next, STALE_TTL_SECONDS)),
     ]);
     return next;
@@ -163,8 +166,6 @@ async function summary(request: Request, env: Env): Promise<OrganizationSnapshot
   const [core, services] = await Promise.all([cachedCore(request, env), getServiceSnapshot()]);
   const serviceIssue = services.some((service) => service.status !== "online");
   const githubIssue = core.sources.github === "degraded";
-  // Cloudflare is an observability source, not the service itself. Partial visibility
-  // should not make Mira look unhealthy when at least one CF resource family is visible.
   const cloudflareIssue =
     core.sources.cloudflare === "degraded" &&
     core.cloudflare.workers.length === 0 &&
@@ -190,6 +191,7 @@ export default {
         service: "mira-control-room",
         version: "0.2.0",
         commit: env.DEPLOYED_COMMIT ?? null,
+        githubAuth: env.GITHUB_READ_TOKEN ? "authenticated" : "anonymous",
         now: new Date().toISOString(),
       });
     }
@@ -199,6 +201,7 @@ export default {
       return json(snapshot, {
         headers: {
           "x-mira-github": snapshot.sources.github,
+          "x-mira-github-auth": env.GITHUB_READ_TOKEN ? "authenticated" : "anonymous",
           "x-mira-cloudflare": snapshot.sources.cloudflare,
         },
       });
