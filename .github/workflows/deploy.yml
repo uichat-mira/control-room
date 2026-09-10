@@ -48,6 +48,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GITHUB_READ_TOKEN: ${{ secrets.GITHUB_READ_TOKEN }}
       CONTROL_ROOM_URL: https://uichat-mira-control-room.dangjingtao.workers.dev
     steps:
       - name: Checkout
@@ -73,9 +74,10 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          # Reuse the organization shared Cloudflare key at runtime under the
-          # read-adapter binding name. The adapter itself remains read-only.
           printf 'CLOUDFLARE_READ_TOKEN=%s\n' "$CLOUDFLARE_API_TOKEN" > /tmp/control-room-secrets.env
+          if [ -n "${GITHUB_READ_TOKEN:-}" ]; then
+            printf 'GITHUB_READ_TOKEN=%s\n' "$GITHUB_READ_TOKEN" >> /tmp/control-room-secrets.env
+          fi
 
       - name: Deploy to Cloudflare
         shell: bash
@@ -127,7 +129,6 @@ jobs:
             "${CONTROL_ROOM_URL}/api/summary" --output /tmp/control-room-summary.json
 
           cat /tmp/control-room-health.json
-          cat /tmp/control-room-summary.json
           node <<'NODE'
           const fs = require('node:fs');
           const health = JSON.parse(fs.readFileSync('/tmp/control-room-health.json', 'utf8'));
@@ -156,7 +157,7 @@ jobs:
           }
 
           console.log(
-            `Smoke OK: ${summary.repositories.length} repos, ${summary.services.length} services, GitHub=${summary.sources.github}, CF=${summary.sources.cloudflare}, Pages=${summary.cloudflare.pages.length}`,
+            `Smoke OK: ${summary.repositories.length} repos, ${summary.services.length} services, GitHub=${summary.sources.github}/${health.githubAuth}, CF=${summary.sources.cloudflare}, Pages=${summary.cloudflare.pages.length}`,
           );
           NODE
 
