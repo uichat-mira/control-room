@@ -128,12 +128,21 @@ function buildFailed(repositories: OrganizationRepository[]): boolean {
 async function summary(request: Request, env: Env): Promise<OrganizationSnapshot> {
   const [core, services] = await Promise.all([cachedCore(request, env), getServiceSnapshot()]);
   const serviceIssue = services.some((service) => service.status !== "online");
-  const sourceIssue = core.sources.github === "degraded" || core.sources.cloudflare === "degraded";
+  const githubIssue = core.sources.github === "degraded";
+  // Cloudflare is an observability source, not the service itself. Partial visibility
+  // (for example Workers visible but Pages denied) should not make Mira look unhealthy.
+  const cloudflareIssue =
+    core.sources.cloudflare === "degraded" &&
+    core.cloudflare.workers.length === 0 &&
+    core.cloudflare.pages.length === 0;
 
   return {
     ...core,
     services,
-    status: sourceIssue || serviceIssue || buildFailed(core.repositories) ? "degraded" : "connected",
+    status:
+      githubIssue || cloudflareIssue || serviceIssue || buildFailed(core.repositories)
+        ? "degraded"
+        : "connected",
   };
 }
 
