@@ -1,48 +1,69 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ControlRoomSummary, SourceStatus } from "./shared";
+import type { OrganizationSnapshot } from "./shared";
 
-const fallback: ControlRoomSummary = {
+const fallback: OrganizationSnapshot = {
   status: "degraded",
   generatedAt: new Date().toISOString(),
-  sources: {
-    github: { label: "GitHub", status: "unavailable", detail: "API unavailable" },
-    cloudflare: { label: "Cloudflare", status: "unavailable", detail: "API unavailable" },
-    health: { label: "Runtime", status: "unavailable", detail: "API unavailable" },
+  organization: {
+    login: "uichat-mira",
+    name: null,
+    htmlUrl: "https://github.com/uichat-mira",
+    avatarUrl: "",
+    description: null,
+    publicRepos: 0,
+    followers: 0,
   },
-  builds: [],
-  services: [],
-  work: { main: "Unknown", next: "Unknown", blocked: "Unknown" },
+  repositories: [],
+  error: "GitHub organization data unavailable",
 };
 
-const sourceGlyph = (status: SourceStatus) =>
-  status === "ok" ? "●" : status === "pending" ? "◐" : "○";
+const formatTime = (value: string | null) => {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+};
 
 export default function App() {
-  const [data, setData] = useState<ControlRoomSummary | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [data, setData] = useState<OrganizationSnapshot | null>(null);
 
   useEffect(() => {
-    fetch("/api/summary")
-      .then((response) => {
-        if (!response.ok) throw new Error(String(response.status));
-        return response.json() as Promise<ControlRoomSummary>;
+    fetch("/api/organization")
+      .then(async (response) => {
+        const body = (await response.json()) as OrganizationSnapshot;
+        if (!response.ok) throw body;
+        return body;
       })
       .then(setData)
-      .catch(() => {
-        setFailed(true);
+      .catch((error) => {
+        if (error && typeof error === "object" && "organization" in error) {
+          setData(error as OrganizationSnapshot);
+          return;
+        }
         setData(fallback);
       });
   }, []);
 
   const view = data ?? fallback;
-  const generatedAt = useMemo(
+  const prodRepos = useMemo(
+    () => view.repositories.filter((repo) => repo.defaultBranch === "prod").length,
+    [view.repositories],
+  );
+  const activeRepos = useMemo(
+    () => view.repositories.filter((repo) => !repo.archived).length,
+    [view.repositories],
+  );
+  const lastPush = useMemo(
     () =>
-      new Intl.DateTimeFormat(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }).format(new Date(view.generatedAt)),
-    [view.generatedAt],
+      view.repositories
+        .map((repo) => repo.pushedAt)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1) ?? null,
+    [view.repositories],
   );
 
   return (
@@ -50,95 +71,89 @@ export default function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">MIRA / CONTROL ROOM</p>
-          <h1>System overview</h1>
+          <h1>Organization</h1>
         </div>
-        <div className="system-state">
+        <a className="org-link" href={view.organization.htmlUrl} target="_blank" rel="noreferrer">
           <span className={"beacon " + view.status} />
-          <div>
-            <strong>{view.status.toUpperCase()}</strong>
-            <small>{failed ? "API disconnected" : "updated " + generatedAt}</small>
-          </div>
-        </div>
+          <span>
+            <strong>{view.organization.login}</strong>
+            <small>{view.status === "connected" ? "GitHub connected" : "GitHub degraded"}</small>
+          </span>
+        </a>
       </header>
 
-      <section className="source-strip" aria-label="Data sources">
-        {Object.values(view.sources).map((source) => (
-          <article className="source" key={source.label}>
-            <span className={"source-glyph " + source.status}>{sourceGlyph(source.status)}</span>
-            <div>
-              <strong>{source.label}</strong>
-              <small>{source.detail}</small>
-            </div>
-          </article>
-        ))}
+      <section className="metrics" aria-label="Organization metrics">
+        <article>
+          <span>Repositories</span>
+          <strong>{view.repositories.length}</strong>
+          <small>{activeRepos} active</small>
+        </article>
+        <article>
+          <span>Prod default</span>
+          <strong>{prodRepos}</strong>
+          <small>repositories</small>
+        </article>
+        <article>
+          <span>Public repos</span>
+          <strong>{view.organization.publicRepos}</strong>
+          <small>GitHub organization</small>
+        </article>
+        <article>
+          <span>Latest push</span>
+          <strong className="metric-time">{formatTime(lastPush)}</strong>
+          <small>across visible repos</small>
+        </article>
       </section>
 
-      <section className="grid">
-        <article className="panel panel-wide">
-          <div className="panel-heading">
-            <span>Builds</span>
-            <small>{view.builds.length} active</small>
+      <section className="repo-section">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">LIVE / GITHUB</p>
+            <h2>Repositories</h2>
           </div>
-          <div className="rows">
-            {view.builds.length === 0 ? (
-              <p className="empty">No build data yet.</p>
-            ) : (
-              view.builds.map((build) => (
-                <div className="row" key={build.name}>
-                  <div>
-                    <strong>{build.name}</strong>
-                    <small>{build.detail}</small>
-                  </div>
-                  <span className={"pill " + build.status}>{build.status}</span>
-                </div>
-              ))
-            )}
-          </div>
-        </article>
+          <small>updated {formatTime(view.generatedAt)}</small>
+        </div>
 
-        <article className="panel">
-          <div className="panel-heading">
-            <span>Services</span>
-            <small>runtime</small>
+        {view.error ? (
+          <div className="error-state">
+            <strong>Organization data unavailable</strong>
+            <span>{view.error}</span>
           </div>
-          <div className="rows">
-            {view.services.map((service) => (
-              <div className="row compact" key={service.name}>
-                <div>
-                  <strong>{service.name}</strong>
-                  <small>{service.detail}</small>
-                </div>
-                <span className={"dot " + service.status} />
-              </div>
+        ) : (
+          <div className="repo-table" role="table" aria-label="Mira repositories">
+            <div className="repo-row repo-head" role="row">
+              <span>Repository</span>
+              <span>Default</span>
+              <span>Language</span>
+              <span>Issues</span>
+              <span>Last push</span>
+            </div>
+            {view.repositories.map((repo) => (
+              <a
+                className="repo-row"
+                href={repo.htmlUrl}
+                target="_blank"
+                rel="noreferrer"
+                role="row"
+                key={repo.fullName}
+              >
+                <span className="repo-name">
+                  <strong>{repo.name}</strong>
+                  <small>{repo.description || repo.fullName}</small>
+                </span>
+                <span><code>{repo.defaultBranch}</code></span>
+                <span>{repo.language || "—"}</span>
+                <span>{repo.openIssuesCount}</span>
+                <span>{formatTime(repo.pushedAt)}</span>
+              </a>
             ))}
           </div>
-        </article>
-
-        <article className="panel work-panel">
-          <div className="panel-heading">
-            <span>Work</span>
-            <small>SSOT projection</small>
-          </div>
-          <dl>
-            <div>
-              <dt>Main</dt>
-              <dd>{view.work.main}</dd>
-            </div>
-            <div>
-              <dt>Next</dt>
-              <dd>{view.work.next}</dd>
-            </div>
-            <div>
-              <dt>Blocked</dt>
-              <dd>{view.work.blocked}</dd>
-            </div>
-          </dl>
-        </article>
+        )}
       </section>
 
       <footer>
-        <span>Mira is building.</span>
-        <span>v0.1.0 · read-only by design</span>
+        <span>Source of truth: GitHub Organization</span>
+        <span>Cloudflare data intentionally disconnected</span>
       </footer>
     </main>
   );

@@ -1,32 +1,31 @@
-export type SourceStatus = "ok" | "pending" | "unavailable";
-
-export interface SourceState {
-  label: string;
-  status: SourceStatus;
-  detail: string;
+export interface OrganizationRepository {
+  name: string;
+  fullName: string;
+  htmlUrl: string;
+  description: string | null;
+  visibility: "public";
+  defaultBranch: string;
+  archived: boolean;
+  fork: boolean;
+  language: string | null;
+  pushedAt: string | null;
+  updatedAt: string;
+  openIssuesCount: number;
+  stars: number;
 }
 
-export interface ControlRoomSummary {
-  status: "operational" | "degraded";
+export interface OrganizationSnapshot {
+  status: "connected" | "degraded";
   generatedAt: string;
-  sources: {
-    github: SourceState;
-    cloudflare: SourceState;
-    health: SourceState;
+  organization: {
+    login: string;
+    name: string | null;
+    htmlUrl: string;
+    avatarUrl: string;
+    description: string | null;
+    publicRepos: number;
+    followers: number;
   };
-  builds: Array<{
-    name: string;
-    status: "passed" | "running" | "pending";
-    detail: string;
-  }>;
-  services: Array<{
-    name: string;
-    status: "online" | "unknown";
-    detail: string;
-  }>;
-  work: {
-    main: string;
-    next: string;
-    blocked: string;
-  };
+  repositories: OrganizationRepository[];
+  error?: string;
 }
