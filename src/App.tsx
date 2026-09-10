@@ -116,8 +116,8 @@ export default function App() {
           if (!active) return;
           if (error && typeof error === "object" && "organization" in error) {
             setData(error as OrganizationSnapshot);
-          } else if (!data) {
-            setData(fallback);
+          } else {
+            setData((current) => current ?? fallback);
           }
         });
     };
@@ -334,21 +334,25 @@ export default function App() {
                 <div className="ops-list">
                   {view.cloudflare.pages.length === 0 ? (
                     <div className="empty-row">No Mira Pages projects visible to this token.</div>
-                  ) : view.cloudflare.pages.map((page) => (
-                    <a
-                      className="cf-row"
-                      key={page.name}
-                      href={page.url || "#"}
-                      target={page.url ? "_blank" : undefined}
-                      rel={page.url ? "noreferrer" : undefined}
-                    >
-                      <span className="ops-name">
-                        <strong>{page.name}</strong>
-                        <small>{page.productionBranch || "production"} · {formatTime(page.deployedAt)}</small>
-                      </span>
-                      <span className="mono-value">{page.status || shortSha(page.commitHash)}</span>
-                    </a>
-                  ))}
+                  ) : view.cloudflare.pages.map((page) => {
+                    const content = (
+                      <>
+                        <span className="ops-name">
+                          <strong>{page.name}</strong>
+                          <small>{page.productionBranch || "production"} · {formatTime(page.deployedAt)}</small>
+                        </span>
+                        <span className="mono-value">{page.status || shortSha(page.commitHash)}</span>
+                      </>
+                    );
+
+                    return page.url ? (
+                      <a className="cf-row" key={page.name} href={page.url} target="_blank" rel="noreferrer">
+                        {content}
+                      </a>
+                    ) : (
+                      <div className="cf-row" key={page.name}>{content}</div>
+                    );
+                  })}
                 </div>
               </article>
             </div>
