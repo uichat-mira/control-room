@@ -4,6 +4,10 @@
   "main": "./src/worker.ts",
   "compatibility_date": "2026-09-10",
   "workers_dev": true,
+  "cache": {
+    "enabled": true,
+    "cross_version_cache": true
+  },
   "assets": {
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
