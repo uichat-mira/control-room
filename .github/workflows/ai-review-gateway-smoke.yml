@@ -1,0 +1,64 @@
+name: AI Review Gateway Smoke
+
+on:
+  workflow_run:
+    workflows:
+      - Control Room CI / Deploy
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: >-
+      ${{
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'prod' &&
+        github.event.workflow_run.conclusion == 'success'
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify deployed AI Review Gateway health
+        shell: bash
+        env:
+          AI_REVIEW_HEALTH_URL: https://control.mira.tomz.io/api/v1/ai-review/health
+        run: |
+          set -euo pipefail
+
+          curl --fail --silent --show-error \
+            --retry 5 --retry-delay 2 --retry-all-errors \
+            "$AI_REVIEW_HEALTH_URL" \
+            --output /tmp/ai-review-health.json
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const health = JSON.parse(fs.readFileSync('/tmp/ai-review-health.json', 'utf8'));
+
+          if (health.ok !== true) throw new Error('AI Review Gateway health is not ok');
+          if (health.service !== 'mira-ai-review-gateway') {
+            throw new Error(`Unexpected service: ${health.service}`);
+          }
+          if (health.runtimeVersion !== 'control-room-ai-review/v0') {
+            throw new Error(`Unexpected runtime version: ${health.runtimeVersion}`);
+          }
+          if (health.packageVersion !== 'mira-ai-review-package/v0') {
+            throw new Error(`Unexpected package version: ${health.packageVersion}`);
+          }
+          if (health.mode !== 'trusted-package-only') {
+            throw new Error(`Unexpected gateway mode: ${health.mode}`);
+          }
+          if (health.github !== 'configured') {
+            throw new Error(`GitHub read credential is not configured: ${health.github}`);
+          }
+          if (!['configured', 'unconfigured'].includes(health.callerAuth)) {
+            throw new Error(`Unexpected caller auth state: ${health.callerAuth}`);
+          }
+          if (!health.policyRef) throw new Error('Organization policy ref is missing');
+
+          console.log(
+            `AI Review Gateway smoke OK: runtime=${health.runtimeVersion}, package=${health.packageVersion}, github=${health.github}, callerAuth=${health.callerAuth}, policyRef=${health.policyRef}`,
+          );
+          NODE
