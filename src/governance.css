@@ -1,0 +1,196 @@
+body:has(.governance-shell) .shell > footer { display: none; }
+
+.governance-shell {
+  width: min(1440px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 4px 0 30px;
+}
+
+.governance-heading { margin-top: 14px; }
+
+.governance-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+
+.governance-metrics > div {
+  min-width: 0;
+  padding: 18px 18px 20px 0;
+}
+
+.governance-metrics > div + div {
+  border-left: 1px solid var(--line-soft);
+  padding-left: 18px;
+}
+
+.governance-metrics span,
+.governance-head,
+.projects-heading small,
+.governance-footnote {
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: .065em;
+  font: 620 10px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.governance-metrics strong {
+  display: block;
+  margin-top: 9px;
+  font-size: 27px;
+  font-weight: 530;
+  letter-spacing: -.035em;
+}
+
+.governance-table,
+.projects-list { display: grid; }
+
+.governance-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) .52fr .52fr 1fr .62fr;
+  gap: 18px;
+  align-items: center;
+  min-height: 68px;
+  border-bottom: 1px solid var(--line-soft);
+  text-decoration: none;
+}
+
+a.governance-row:hover,
+a.project-row:hover { background: var(--hover); }
+
+.governance-head { min-height: 40px; }
+
+.governance-name {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.governance-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 560;
+}
+
+.governance-name small,
+.governance-row > span,
+.project-row > span,
+.projects-heading small,
+.governance-note {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.governance-row > span[data-label="Default branch"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.governance-row > span[data-label="Default branch"] small {
+  color: var(--text-faint);
+  font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.policy-ok { color: var(--ok) !important; }
+.policy-open { color: var(--warn) !important; }
+.project-closed { color: var(--text-faint) !important; }
+
+.projects-block { margin-top: 30px; }
+
+.projects-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 46px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.projects-heading strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.project-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 2fr) .55fr .55fr .9fr;
+  gap: 18px;
+  align-items: center;
+  min-height: 66px;
+  border-bottom: 1px solid var(--line-soft);
+  text-decoration: none;
+}
+
+.project-row > span:not(.governance-name) {
+  font: 560 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.governance-note {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.governance-note-warn { color: var(--warn); }
+
+.governance-footnote {
+  padding-top: 20px;
+  text-transform: none;
+  letter-spacing: .02em;
+}
+
+@media (max-width: 900px) {
+  .governance-shell { width: min(100% - 28px, 1440px); }
+  .governance-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .governance-metrics > div:nth-child(3) { border-left: 0; }
+  .governance-metrics > div:nth-child(n+3) { border-top: 1px solid var(--line-soft); }
+
+  .governance-head { display: none; }
+  .governance-table { gap: 8px; padding-top: 10px; }
+  .governance-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 16px;
+    min-height: 0;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .governance-name { grid-column: 1 / -1; padding-bottom: 3px; }
+  .governance-row > span[data-label] {
+    display: grid;
+    gap: 4px;
+  }
+  .governance-row > span[data-label]::before {
+    content: attr(data-label);
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    font: 650 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .governance-row > span[data-label="Default branch"] {
+    align-items: flex-start;
+  }
+  .governance-row > span[data-label="Default branch"] small { display: none; }
+
+  .project-row {
+    grid-template-columns: 1fr auto;
+    gap: 8px 16px;
+    padding: 14px 0;
+  }
+  .project-row .governance-name { grid-column: 1 / -1; }
+}
+
+@media (max-width: 520px) {
+  .governance-shell { width: min(100% - 20px, 1440px); }
+  .governance-heading { margin-top: 4px; }
+  .governance-metrics > div { padding: 14px 10px 15px 0; }
+  .governance-metrics > div:nth-child(even) { padding-left: 10px; }
+  .governance-metrics strong { font-size: 23px; }
+  .projects-block { margin-top: 24px; }
+}
