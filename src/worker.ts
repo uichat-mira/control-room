@@ -110,9 +110,18 @@ function buildFailed(repositories: OrganizationRepository[]): boolean {
   return repositories.some((repo) => {
     const run = repo.latestWorkflow;
     if (!run || run.status !== "completed") return false;
-    return ["failure", "timed_out", "action_required", "startup_failure"].includes(
+
+    const failed = ["failure", "timed_out", "action_required", "startup_failure"].includes(
       run.conclusion ?? "",
     );
+    if (!failed) return false;
+
+    const releaseAt = repo.latestRelease?.publishedAt;
+    if (releaseAt && new Date(releaseAt).getTime() > new Date(run.updatedAt).getTime()) {
+      return false;
+    }
+
+    return true;
   });
 }
 
