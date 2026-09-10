@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { OrganizationSnapshot } from "./shared";
 
+type ThemeMode = "system" | "light" | "dark";
+
 const fallback: OrganizationSnapshot = {
   status: "degraded",
   generatedAt: new Date().toISOString(),
@@ -27,8 +29,29 @@ const formatTime = (value: string | null) => {
   }).format(new Date(value));
 };
 
+const nextTheme: Record<ThemeMode, ThemeMode> = {
+  system: "light",
+  light: "dark",
+  dark: "system",
+};
+
 export default function App() {
   const [data, setData] = useState<OrganizationSnapshot | null>(null);
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem("mira-control-room-theme");
+    return saved === "light" || saved === "dark" ? saved : "system";
+  });
+
+  useEffect(() => {
+    if (theme === "system") {
+      document.documentElement.removeAttribute("data-theme");
+      localStorage.removeItem("mira-control-room-theme");
+      return;
+    }
+
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("mira-control-room-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     fetch("/api/organization")
@@ -73,13 +96,24 @@ export default function App() {
           <p className="eyebrow">MIRA / CONTROL ROOM</p>
           <h1>Organization</h1>
         </div>
-        <a className="org-link" href={view.organization.htmlUrl} target="_blank" rel="noreferrer">
-          <span className={"beacon " + view.status} />
-          <span>
-            <strong>{view.organization.login}</strong>
-            <small>{view.status === "connected" ? "GitHub connected" : "GitHub degraded"}</small>
-          </span>
-        </a>
+        <div className="header-actions">
+          <button
+            className="theme-toggle"
+            type="button"
+            onClick={() => setTheme(nextTheme[theme])}
+            aria-label={`Theme: ${theme}. Switch to ${nextTheme[theme]}.`}
+            title={`Theme: ${theme}`}
+          >
+            {theme}
+          </button>
+          <a className="org-link" href={view.organization.htmlUrl} target="_blank" rel="noreferrer">
+            <span className={"beacon " + view.status} />
+            <span>
+              <strong>{view.organization.login}</strong>
+              <small>{view.status === "connected" ? "GitHub connected" : "GitHub degraded"}</small>
+            </span>
+          </a>
+        </div>
       </header>
 
       <section className="metrics" aria-label="Organization metrics">
@@ -141,10 +175,10 @@ export default function App() {
                   <strong>{repo.name}</strong>
                   <small>{repo.description || repo.fullName}</small>
                 </span>
-                <span><code>{repo.defaultBranch}</code></span>
-                <span>{repo.language || "—"}</span>
-                <span>{repo.openIssuesCount}</span>
-                <span>{formatTime(repo.pushedAt)}</span>
+                <span data-label="Default"><code>{repo.defaultBranch}</code></span>
+                <span data-label="Language">{repo.language || "—"}</span>
+                <span data-label="Issues">{repo.openIssuesCount}</span>
+                <span data-label="Last push">{formatTime(repo.pushedAt)}</span>
               </a>
             ))}
           </div>
