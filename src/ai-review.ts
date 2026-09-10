@@ -32,6 +32,10 @@ interface GitHubPullRequest {
   };
 }
 
+interface GitHubCommit {
+  sha: string;
+}
+
 interface GitHubContentFile {
   type: "file";
   path: string;
@@ -85,11 +89,7 @@ async function githubJson<T>(env: AiReviewEnv, path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function githubText(
-  env: AiReviewEnv,
-  path: string,
-  accept: string,
-): Promise<string> {
+async function githubText(env: AiReviewEnv, path: string, accept: string) {
   const response = await fetch(`${GITHUB_API}${path}`, {
     headers: githubHeaders(env, accept),
   });
@@ -98,25 +98,38 @@ async function githubText(
 }
 
 function decodeBase64(value: string) {
-  const compact = value.replace(/\s/g, "");
-  const binary = atob(compact);
+  const binary = atob(value.replace(/\s/g, ""));
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   return new TextDecoder().decode(bytes);
+}
+
+function repositoryParts(repository: string) {
+  const [owner, repo] = repository.split("/");
+  return { owner, repo };
+}
+
+async function resolveCommitSha(env: AiReviewEnv, repository: string, ref: string) {
+  const { owner, repo } = repositoryParts(repository);
+  const commit = await githubJson<GitHubCommit>(
+    env,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(ref)}`,
+  );
+  return commit.sha;
 }
 
 async function trustedFile(
   env: AiReviewEnv,
   repository: string,
   path: string,
-  ref: string,
+  immutableRef: string,
   source: TrustedText["source"],
   required: boolean,
 ): Promise<TrustedText | null> {
-  const [owner, repo] = repository.split("/");
+  const { owner, repo } = repositoryParts(repository);
   const endpoint = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path
     .split("/")
     .map(encodeURIComponent)
-    .join("/")}?ref=${encodeURIComponent(ref)}`;
+    .join("/")}?ref=${encodeURIComponent(immutableRef)}`;
   const response = await fetch(`${GITHUB_API}${endpoint}`, {
     headers: githubHeaders(env),
   });
@@ -133,7 +146,7 @@ async function trustedFile(
     source,
     repository,
     path: file.path,
-    ref,
+    ref: immutableRef,
     blobSha: file.sha,
     content: decodeBase64(file.content),
   };
@@ -151,10 +164,10 @@ async function sameSecret(left: string, right: string) {
   ]);
   const aa = new Uint8Array(a);
   const bb = new Uint8Array(b);
-  if (aa.length !== bb.length) return false;
 
-  let mismatch = 0;
-  for (let index = 0; index < aa.length; index += 1) {
+  let mismatch = aa.length ^ bb.length;
+  const length = Math.min(aa.length, bb.length);
+  for (let index = 0; index < length; index += 1) {
     mismatch |= aa[index] ^ bb[index];
   }
   return mismatch === 0;
@@ -164,8 +177,7 @@ async function authorized(request: Request, env: AiReviewEnv) {
   const configured = env.AI_REVIEW_GATEWAY_TOKEN?.trim();
   if (!configured) return "unconfigured" as const;
 
-  const authorization = request.headers.get("authorization") || "";
-  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  const match = (request.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i);
   if (!match) return false as const;
   return sameSecret(match[1].trim(), configured);
 }
@@ -201,9 +213,7 @@ async function buildReviewPackage(request: Request, env: AiReviewEnv) {
       { status: 503 },
     );
   }
-  if (!auth) {
-    return json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!auth) return json({ error: "unauthorized" }, { status: 401 });
 
   let input: unknown;
   try {
@@ -233,7 +243,7 @@ async function buildReviewPackage(request: Request, env: AiReviewEnv) {
   }
 
   try {
-    const [, repo] = repository.split("/");
+    const { repo } = repositoryParts(repository);
     const pr = await githubJson<GitHubPullRequest>(
       env,
       `/repos/${ORGANIZATION}/${encodeURIComponent(repo)}/pulls/${pullRequest}`,
@@ -242,7 +252,6 @@ async function buildReviewPackage(request: Request, env: AiReviewEnv) {
     if (pr.base.repo.full_name !== repository) {
       return json({ error: "repository_mismatch" }, { status: 409 });
     }
-
     if (!pr.head.repo || pr.head.repo.full_name !== repository) {
       return json(
         {
@@ -253,14 +262,25 @@ async function buildReviewPackage(request: Request, env: AiReviewEnv) {
       );
     }
 
-    const policyRef = env.AI_REVIEW_POLICY_REF?.trim() || DEFAULT_POLICY_REF;
+    // Resolve every mutable control ref before reading any trusted Organization file.
+    // PR base/head are already immutable commit SHAs from the GitHub PR object.
+    const requestedPolicyRef = env.AI_REVIEW_POLICY_REF?.trim() || DEFAULT_POLICY_REF;
+    const policyCommitSha = await resolveCommitSha(env, POLICY_REPOSITORY, requestedPolicyRef);
+
     const [policy, outputContract, profile, rootContract, rawDiff] = await Promise.all([
-      trustedFile(env, POLICY_REPOSITORY, "ai-review/POLICY.md", policyRef, "organization", true),
+      trustedFile(
+        env,
+        POLICY_REPOSITORY,
+        "ai-review/POLICY.md",
+        policyCommitSha,
+        "organization",
+        true,
+      ),
       trustedFile(
         env,
         POLICY_REPOSITORY,
         "ai-review/OUTPUT-CONTRACT.md",
-        policyRef,
+        policyCommitSha,
         "organization",
         true,
       ),
@@ -268,7 +288,7 @@ async function buildReviewPackage(request: Request, env: AiReviewEnv) {
       trustedFile(env, repository, ROOT_CONTRACT_PATH, pr.base.sha, "base", false),
       githubText(
         env,
-        `/repos/${ORGANIZATION}/${encodeURIComponent(repo)}/pulls/${pullRequest}`,
+        `/repos/${ORGANIZATION}/${encodeURIComponent(repo)}/compare/${encodeURIComponent(pr.base.sha)}...${encodeURIComponent(pr.head.sha)}`,
         "application/vnd.github.v3.diff",
       ),
     ]);
@@ -287,7 +307,8 @@ async function buildReviewPackage(request: Request, env: AiReviewEnv) {
       trust: {
         headIsUntrusted: true,
         executesPullRequestCode: false,
-        organizationControlsSource: `${POLICY_REPOSITORY}@${policyRef}`,
+        organizationControlsSource: `${POLICY_REPOSITORY}@${policyCommitSha}`,
+        requestedOrganizationPolicyRef: requestedPolicyRef,
         repositoryControlsSource: `${repository}@${pr.base.sha}`,
       },
       pullRequest: {
@@ -306,6 +327,7 @@ async function buildReviewPackage(request: Request, env: AiReviewEnv) {
         repositoryProfile: profile,
         rootContract,
         identity: {
+          policyCommitSha,
           policyBlobSha: policy.blobSha,
           outputContractBlobSha: outputContract.blobSha,
           profileBlobSha: profile?.blobSha ?? null,
@@ -313,6 +335,7 @@ async function buildReviewPackage(request: Request, env: AiReviewEnv) {
         },
       },
       diff: {
+        source: `${pr.base.sha}...${pr.head.sha}`,
         content: diff,
         chars: diff.length,
         originalChars: rawDiff.length,
@@ -320,7 +343,9 @@ async function buildReviewPackage(request: Request, env: AiReviewEnv) {
         limitChars: MAX_DIFF_CHARS,
       },
       gaps: [
-        ...(profile ? [] : [`Missing ${PROFILE_PATH} at base SHA; repository-specific review rules are not yet migrated.`]),
+        ...(profile
+          ? []
+          : [`Missing ${PROFILE_PATH} at base SHA; repository-specific review rules are not yet migrated.`]),
         ...(diffTruncated
           ? [`PR diff exceeded ${MAX_DIFF_CHARS} characters and was truncated by Review Gateway v0.`]
           : []),
@@ -337,10 +362,7 @@ async function buildReviewPackage(request: Request, env: AiReviewEnv) {
   }
 }
 
-export async function handleAiReviewRequest(
-  request: Request,
-  env: AiReviewEnv,
-): Promise<Response> {
+export async function handleAiReviewRequest(request: Request, env: AiReviewEnv): Promise<Response> {
   const { pathname } = new URL(request.url);
 
   if (pathname === "/api/v1/ai-review/health") {
