@@ -12,7 +12,7 @@ Control Room is a **read-only projection** of existing sources of truth. It must
 - Latest default-branch GitHub Actions run per repository
 - Latest GitHub Release per repository
 - Live HTTP probes for Mira Website, Relay, and Control Room
-- Optional Cloudflare Workers / Pages deployment read model
+- Cloudflare Workers / Pages deployment read model
 - `/wall` large-screen mode with 60-second refresh
 - `GET /api/health`
 - `GET /api/summary`
@@ -21,23 +21,14 @@ GitHub / Cloudflare core metadata is edge-cached to protect upstream rate limits
 
 ## Cloudflare read model
 
-CI/CD uses the organization-wide deployment credentials:
+CI/CD reuses the organization-wide Cloudflare credentials:
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-The deployment token is **not** injected into the Worker runtime.
+The deploy workflow also installs the same shared token into the Worker runtime under the internal binding name `CLOUDFLARE_READ_TOKEN`. Control Room only performs read requests with that runtime binding; no Cloudflare mutation endpoints are implemented in the application.
 
-To enable Cloudflare observability, add a separate GitHub Actions secret named:
-
-- `CLOUDFLARE_READ_TOKEN`
-
-Recommended account permissions:
-
-- Workers Scripts: Read
-- Pages: Read
-
-The deploy workflow automatically uploads this optional secret to the Worker runtime using Wrangler's secrets-file mechanism. The account ID and deployed Git commit are injected as non-secret runtime variables.
+The effective data scope still depends on the permissions granted to the shared token. If a Cloudflare API family is not permitted, Control Room keeps the available data and reports that source as partial/degraded instead of failing the whole API.
 
 Only Cloudflare resources whose names contain `mira` or `uichat` are exposed by the public Control Room read model.
 
@@ -53,7 +44,7 @@ npm install
 npm run dev
 ```
 
-For local Cloudflare reads, put `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_READ_TOKEN` in an uncommitted `.dev.vars` or `.env` file.
+For local Cloudflare reads, put `CLOUDFLARE_ACCOUNT_ID` and a compatible token in an uncommitted `.dev.vars` or `.env` file as `CLOUDFLARE_READ_TOKEN`.
 
 ## Verify
 
