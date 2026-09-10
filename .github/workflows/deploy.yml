@@ -131,12 +131,15 @@ jobs:
 
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
             "${CONTROL_ROOM_URL}/api/summary" --output /tmp/control-room-summary.json
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            "${CONTROL_ROOM_URL}/api/governance" --output /tmp/control-room-governance.json
 
           cat /tmp/control-room-health.json
           node <<'NODE'
           const fs = require('node:fs');
           const health = JSON.parse(fs.readFileSync('/tmp/control-room-health.json', 'utf8'));
           const summary = JSON.parse(fs.readFileSync('/tmp/control-room-summary.json', 'utf8'));
+          const governance = JSON.parse(fs.readFileSync('/tmp/control-room-governance.json', 'utf8'));
 
           if (health.ok !== true || health.service !== 'mira-control-room') {
             throw new Error('Unexpected Control Room health response');
@@ -162,9 +165,21 @@ jobs:
           if (summary.sources.cloudflare === 'unconfigured') {
             throw new Error('Shared Cloudflare key was supplied but runtime reports unconfigured');
           }
+          if (!governance.github || governance.github.authenticated !== true) {
+            throw new Error('GitHub governance is not using authenticated reads');
+          }
+          if (!Array.isArray(governance.repositories) || governance.repositories.length !== summary.repositories.length) {
+            throw new Error('GitHub governance repository projection is incomplete');
+          }
+          if (governance.repositories.some((repo) => !repo.governance || !('openIssues' in repo.governance) || !('openPullRequests' in repo.governance))) {
+            throw new Error('GitHub governance fields are missing');
+          }
+          if (!governance.github.projects || !['connected', 'unavailable'].includes(governance.github.projects.status)) {
+            throw new Error('GitHub Projects projection is invalid');
+          }
 
           console.log(
-            `Smoke OK: ${summary.repositories.length} repos, ${summary.services.length} services, GitHub=${summary.sources.github}/${health.githubAuth}, CF=${summary.sources.cloudflare}, Pages=${summary.cloudflare.pages.length}`,
+            `Smoke OK: ${summary.repositories.length} repos, ${summary.services.length} services, GitHub=${summary.sources.github}/${health.githubAuth}, Governance=${governance.github.governanceStatus}, Projects=${governance.github.projects.status}/${governance.github.projects.items?.length ?? 0}, CF=${summary.sources.cloudflare}, Pages=${summary.cloudflare.pages.length}`,
           );
           NODE
 
