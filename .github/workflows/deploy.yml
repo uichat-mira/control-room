@@ -129,7 +129,7 @@ jobs:
           set -euo pipefail
 
           ready=0
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error \
               "${CONTROL_ROOM_URL}/api/v1/health" --output /tmp/control-room-health.json; then
               if node <<'NODE'
@@ -147,7 +147,7 @@ jobs:
                 break
               fi
             fi
-            echo "Waiting for Worker commit ${GITHUB_SHA} (attempt ${attempt}/12)..."
+            echo "Waiting for Worker commit ${GITHUB_SHA} (attempt ${attempt}/30)..."
             sleep 2
           done
 
@@ -163,6 +163,10 @@ jobs:
             "${CONTROL_ROOM_URL}/api/v1/governance" --output /tmp/control-room-governance.json
           curl --fail --silent --show-error --retry 3 --retry-delay 1 --retry-all-errors \
             "${CONTROL_ROOM_URL}/openapi.json" --output /tmp/control-room-openapi.json
+          curl --fail --silent --show-error --retry 3 --retry-delay 1 --retry-all-errors \
+            "${CONTROL_ROOM_URL}/api/v1/repos" --output /tmp/control-room-repos.json
+          curl --fail --silent --show-error --retry 3 --retry-delay 1 --retry-all-errors \
+            "${CONTROL_ROOM_URL}/api/v1/deployments" --output /tmp/control-room-deployments.json
 
           cat /tmp/control-room-health.json
           node <<'NODE'
@@ -171,6 +175,8 @@ jobs:
           const summary = JSON.parse(fs.readFileSync('/tmp/control-room-summary.json', 'utf8'));
           const governance = JSON.parse(fs.readFileSync('/tmp/control-room-governance.json', 'utf8'));
           const openapi = JSON.parse(fs.readFileSync('/tmp/control-room-openapi.json', 'utf8'));
+          const repos = JSON.parse(fs.readFileSync('/tmp/control-room-repos.json', 'utf8'));
+          const deployments = JSON.parse(fs.readFileSync('/tmp/control-room-deployments.json', 'utf8'));
 
           console.log(
             `GitHub smoke: status=${summary.sources?.github ?? 'missing'}, repos=${summary.repositories?.length ?? 0}, error=${summary.error ?? 'none'}, governance=${governance.github?.governanceStatus ?? 'missing'}, governanceRepos=${governance.repositories?.length ?? 0}, projects=${governance.github?.projects?.status ?? 'missing'}`,
@@ -221,6 +227,12 @@ jobs:
           }
           if (!governance.github.projects || !['connected', 'unavailable'].includes(governance.github.projects.status)) {
             throw new Error('GitHub Projects projection is invalid');
+          }
+          if (repos.apiVersion !== 'v1' || !Array.isArray(repos.items) || repos.items.length < 1) {
+            throw new Error('Repository-only endpoint is invalid');
+          }
+          if (deployments.apiVersion !== 'v1' || !Array.isArray(deployments.workers) || !Array.isArray(deployments.pages)) {
+            throw new Error('Deployment-only endpoint is invalid');
           }
 
           if (governance.repositories.length !== summary.repositories.length) {
