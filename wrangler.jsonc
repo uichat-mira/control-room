@@ -4,6 +4,12 @@
   "main": "./src/gateway.ts",
   "compatibility_date": "2026-09-10",
   "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "control.mira.tomz.io",
+      "custom_domain": true
+    }
+  ],
   "cache": {
     "enabled": true,
     "cross_version_cache": true
