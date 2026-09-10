@@ -1,3 +1,5 @@
+import type { CloudflareSnapshot, CloudflareSourceStatus } from "./cloudflare";
+
 export type WorkflowConclusion =
   | "success"
   | "failure"
@@ -68,9 +70,11 @@ export interface OrganizationSnapshot {
   };
   sources: {
     github: "connected" | "degraded";
-    cloudflare: "pending";
+    cloudflare: CloudflareSourceStatus;
   };
   repositories: OrganizationRepository[];
   services: ServiceProbe[];
+  cloudflare: CloudflareSnapshot;
+  deployedCommit: string | null;
   error?: string;
 }
