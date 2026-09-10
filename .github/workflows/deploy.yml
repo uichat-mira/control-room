@@ -48,7 +48,6 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_READ_TOKEN: ${{ secrets.CLOUDFLARE_READ_TOKEN }}
       CONTROL_ROOM_URL: https://uichat-mira-control-room.dangjingtao.workers.dev
     steps:
       - name: Checkout
@@ -73,13 +72,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "EXPECT_CF_READ=0" >> "$GITHUB_ENV"
-
-          if [ -n "${CLOUDFLARE_READ_TOKEN:-}" ]; then
-            umask 077
-            printf 'CLOUDFLARE_READ_TOKEN=%s\n' "$CLOUDFLARE_READ_TOKEN" > /tmp/control-room-secrets.env
-            echo "EXPECT_CF_READ=1" >> "$GITHUB_ENV"
-          fi
+          umask 077
+          # Reuse the organization shared Cloudflare key at runtime under the
+          # read-adapter binding name. The adapter itself remains read-only.
+          printf 'CLOUDFLARE_READ_TOKEN=%s\n' "$CLOUDFLARE_API_TOKEN" > /tmp/control-room-secrets.env
+          echo "EXPECT_CF_READ=1" >> "$GITHUB_ENV"
 
       - name: Deploy to Cloudflare
         shell: bash
@@ -87,16 +84,11 @@ jobs:
           set -euo pipefail
           npm run build
 
-          args=(
-            --var "CLOUDFLARE_ACCOUNT_ID:${CLOUDFLARE_ACCOUNT_ID}"
-            --var "DEPLOYED_COMMIT:${GITHUB_SHA}"
-          )
+          npx wrangler deploy \
+            --var "CLOUDFLARE_ACCOUNT_ID:${CLOUDFLARE_ACCOUNT_ID}" \
+            --var "DEPLOYED_COMMIT:${GITHUB_SHA}" \
+            --secrets-file /tmp/control-room-secrets.env
 
-          if [ -f /tmp/control-room-secrets.env ]; then
-            args+=(--secrets-file /tmp/control-room-secrets.env)
-          fi
-
-          npx wrangler deploy "${args[@]}"
           rm -f /tmp/control-room-secrets.env
 
       - name: Smoke test deployed API
@@ -134,8 +126,8 @@ jobs:
           if (!summary.cloudflare || !Array.isArray(summary.cloudflare.workers) || !Array.isArray(summary.cloudflare.pages)) {
             throw new Error('Control Room Cloudflare payload is invalid');
           }
-          if (process.env.EXPECT_CF_READ === '1' && summary.sources.cloudflare === 'unconfigured') {
-            throw new Error('Cloudflare read token was supplied but runtime reports unconfigured');
+          if (summary.sources.cloudflare === 'unconfigured') {
+            throw new Error('Shared Cloudflare key was supplied but runtime reports unconfigured');
           }
 
           console.log(
