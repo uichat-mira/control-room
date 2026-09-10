@@ -1,2 +1,0 @@
-# Keep the canonical public OpenAPI URL stable while the versioned handler lives under /api/*.
-/openapi.json /api/v1/openapi.json 200
