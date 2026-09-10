@@ -24,9 +24,25 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { OrganizationSnapshot, RepositoryWorkflow } from "./shared";
+import type {
+  GitHubOrganizationObservability,
+  OrganizationSnapshot,
+  RepositoryGovernance,
+  RepositoryWorkflow,
+} from "./shared";
 
 type ThemeMode = "system" | "light" | "dark";
+
+interface GovernancePayload {
+  generatedAt: string;
+  status?: "connected" | "degraded";
+  error?: string;
+  github?: GitHubOrganizationObservability;
+  repositories: Array<{
+    fullName: string;
+    governance?: RepositoryGovernance;
+  }>;
+}
 
 const now = new Date().toISOString();
 const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -128,6 +144,7 @@ const buildIsFailure = (run: RepositoryWorkflow | null) => {
 export default function App() {
   const isWall = window.location.pathname === "/wall";
   const [data, setData] = useState<OrganizationSnapshot | null>(null);
+  const [governanceData, setGovernanceData] = useState<GovernancePayload | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem("mira-control-room-theme");
     return saved === "light" || saved === "dark" ? saved : "system";
@@ -182,28 +199,67 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (isWall) return;
+    let active = true;
+
+    const refreshGovernance = () => {
+      fetch("/api/governance", { cache: "no-store" })
+        .then(async (response) => {
+          const body = (await response.json()) as GovernancePayload;
+          if (!response.ok) throw new Error(`Governance API ${response.status}`);
+          return body;
+        })
+        .then((body) => {
+          if (active) setGovernanceData(body);
+        })
+        .catch(() => {
+          // Keep the previous governance projection if a refresh fails.
+        });
+    };
+
+    refreshGovernance();
+    const timer = window.setInterval(refreshGovernance, 5 * 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [isWall]);
+
   const view = data ?? fallback;
-  const activeRepos = useMemo(() => view.repositories.filter((repo) => !repo.archived).length, [view.repositories]);
-  const buildsWithRuns = useMemo(() => view.repositories.filter((repo) => Boolean(repo.latestWorkflow)).length, [view.repositories]);
-  const healthyBuilds = useMemo(
-    () => view.repositories.filter((repo) => repo.latestWorkflow?.status === "completed" && repo.latestWorkflow.conclusion === "success").length,
-    [view.repositories],
+  const governanceByRepo = useMemo(
+    () => new Map((governanceData?.repositories ?? []).map((repo) => [repo.fullName, repo.governance])),
+    [governanceData],
   );
-  const failedBuilds = useMemo(() => view.repositories.filter((repo) => buildIsFailure(repo.latestWorkflow)).length, [view.repositories]);
-  const runningBuilds = useMemo(() => view.repositories.filter((repo) => repo.latestWorkflow && repo.latestWorkflow.status !== "completed").length, [view.repositories]);
+  const repositories = useMemo(
+    () => view.repositories.map((repo) => ({ ...repo, governance: governanceByRepo.get(repo.fullName) ?? repo.governance })),
+    [view.repositories, governanceByRepo],
+  );
+  const activeRepos = useMemo(() => repositories.filter((repo) => !repo.archived).length, [repositories]);
+  const buildsWithRuns = useMemo(() => repositories.filter((repo) => Boolean(repo.latestWorkflow)).length, [repositories]);
+  const healthyBuilds = useMemo(
+    () => repositories.filter((repo) => repo.latestWorkflow?.status === "completed" && repo.latestWorkflow.conclusion === "success").length,
+    [repositories],
+  );
+  const failedBuilds = useMemo(() => repositories.filter((repo) => buildIsFailure(repo.latestWorkflow)).length, [repositories]);
+  const runningBuilds = useMemo(() => repositories.filter((repo) => repo.latestWorkflow && repo.latestWorkflow.status !== "completed").length, [repositories]);
   const onlineServices = useMemo(() => view.services.filter((service) => service.status === "online").length, [view.services]);
   const unhealthyServices = useMemo(() => view.services.filter((service) => service.status !== "online").length, [view.services]);
   const unprotectedRepos = useMemo(
-    () => view.repositories.filter((repo) => repo.governance?.defaultBranchProtected === false).length,
-    [view.repositories],
+    () => repositories.filter((repo) => repo.governance?.defaultBranchProtected === false).length,
+    [repositories],
+  );
+  const policyKnown = useMemo(
+    () => repositories.filter((repo) => repo.governance?.defaultBranchProtected !== undefined && repo.governance?.defaultBranchProtected !== null).length,
+    [repositories],
   );
   const openIssues = useMemo(
-    () => view.repositories.reduce((sum, repo) => sum + (repo.governance?.openIssues ?? 0), 0),
-    [view.repositories],
+    () => repositories.reduce((sum, repo) => sum + (repo.governance?.openIssues ?? 0), 0),
+    [repositories],
   );
   const openPrs = useMemo(
-    () => view.repositories.reduce((sum, repo) => sum + (repo.governance?.openPullRequests ?? 0), 0),
-    [view.repositories],
+    () => repositories.reduce((sum, repo) => sum + (repo.governance?.openPullRequests ?? 0), 0),
+    [repositories],
   );
   const workerAnalytics = useMemo(
     () => new Map(view.cloudflare.analytics24h.workers.map((worker) => [worker.name, worker])),
@@ -217,7 +273,7 @@ export default function App() {
     [view.cloudflare.analytics24h.workers],
   );
   const cloudflareAssets = view.cloudflare.workers.length + view.cloudflare.pages.length;
-  const projects = view.github?.projects.status === "connected" ? view.github.projects.items : [];
+  const projects = governanceData?.github?.projects.status === "connected" ? governanceData.github.projects.items : [];
   const activeProject = projects.find((project) => !project.closed) ?? projects[0] ?? null;
   const attentionCount = failedBuilds + unhealthyServices + unprotectedRepos;
 
@@ -268,7 +324,7 @@ export default function App() {
           <div className="attention-facts">
             <span><Activity size={14} /> {failedBuilds} failed builds{runningBuilds ? ` · ${runningBuilds} running` : ""}</span>
             <span><Server size={14} /> {unhealthyServices} unhealthy services</span>
-            <span><ShieldAlert size={14} /> {unprotectedRepos} open default branches</span>
+            <span><ShieldAlert size={14} /> {policyKnown ? `${unprotectedRepos} open default branches` : "policy loading"}</span>
           </div>
         </section>
       )}
@@ -276,7 +332,7 @@ export default function App() {
       <section className="metrics visual-metrics" aria-label="System metrics">
         <article>
           <span className="metric-label"><GitBranch size={15} /> Repositories</span>
-          <strong>{view.repositories.length}</strong>
+          <strong>{repositories.length}</strong>
           <small>{activeRepos} active</small>
         </article>
         <article>
@@ -325,7 +381,7 @@ export default function App() {
               <small>{healthyBuilds} passing</small>
             </div>
             <div className="ops-list">
-              {view.repositories.map((repo) => (
+              {repositories.map((repo) => (
                 <a className="ops-row" key={repo.fullName} href={repo.latestWorkflow?.htmlUrl || repo.htmlUrl} target="_blank" rel="noreferrer">
                   <span className="ops-name">
                     <strong>{repo.name}</strong>
@@ -453,20 +509,21 @@ export default function App() {
               <p className="eyebrow">FLEET / GITHUB</p>
               <h2>Repositories</h2>
             </div>
-            <small>{openIssues} issues · {openPrs} PRs · {unprotectedRepos} open defaults</small>
+            <small>{governanceData ? `${openIssues} issues · ${openPrs} PRs · ${unprotectedRepos} open defaults` : "loading work & policy"}</small>
           </div>
 
           {view.error && <div className="error-state"><strong>GitHub data is temporarily degraded</strong><span>{view.error}</span></div>}
+          {governanceData?.error && <div className="cf-warning">Governance: {governanceData.error}</div>}
 
-          {view.repositories.length > 0 ? (
+          {repositories.length > 0 ? (
             <div className="fleet-table" role="table" aria-label="Mira repository fleet">
               <div className="fleet-row fleet-head" role="row">
                 <span>Repository</span><span>Build</span><span>Work</span><span>Policy</span><span>Release</span><span>Updated</span>
               </div>
-              {view.repositories.map((repo) => {
+              {repositories.map((repo) => {
                 const protectedBranch = repo.governance?.defaultBranchProtected;
-                const issues = repo.governance?.openIssues ?? repo.openIssuesCount;
-                const prs = repo.governance?.openPullRequests ?? 0;
+                const issues = repo.governance?.openIssues;
+                const prs = repo.governance?.openPullRequests;
                 return (
                   <a className="fleet-row" href={repo.htmlUrl} target="_blank" rel="noreferrer" role="row" key={repo.fullName}>
                     <span className="repo-name"><strong>{repo.name}</strong><small><GitBranch size={11} /> {repo.defaultBranch}</small></span>
@@ -474,10 +531,10 @@ export default function App() {
                       {workflowTone(repo.latestWorkflow) === "success" ? <CheckCircle2 size={14} /> : workflowTone(repo.latestWorkflow) === "failure" ? <AlertTriangle size={14} /> : <Activity size={14} />}
                       {workflowText(repo.latestWorkflow)}
                     </span>
-                    <span data-label="Work" className="fleet-work"><CircleDot size={13} /> {issues}<GitPullRequest size={13} /> {prs}</span>
+                    <span data-label="Work" className="fleet-work"><CircleDot size={13} /> {issues ?? "—"}<GitPullRequest size={13} /> {prs ?? "—"}</span>
                     <span data-label="Policy" className={"fleet-policy " + (protectedBranch ? "protected" : protectedBranch === false ? "open" : "unknown")}>
                       {protectedBranch ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
-                      {protectedBranch ? "protected" : protectedBranch === false ? "open" : "unknown"}
+                      {protectedBranch ? "protected" : protectedBranch === false ? "open" : "pending"}
                     </span>
                     <span data-label="Release">{repo.latestRelease?.tagName || "—"}</span>
                     <span data-label="Updated">{formatTime(repo.pushedAt)}</span>
