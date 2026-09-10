@@ -3,6 +3,13 @@ import type { OrganizationSnapshot, RepositoryWorkflow } from "./shared";
 
 type ThemeMode = "system" | "light" | "dark";
 
+const emptyCloudflare = {
+  status: "unconfigured" as const,
+  workers: [],
+  pages: [],
+  errors: [],
+};
+
 const fallback: OrganizationSnapshot = {
   status: "degraded",
   generatedAt: new Date().toISOString(),
@@ -15,10 +22,12 @@ const fallback: OrganizationSnapshot = {
     publicRepos: 0,
     followers: 0,
   },
-  sources: { github: "degraded", cloudflare: "pending" },
+  sources: { github: "degraded", cloudflare: "unconfigured" },
   repositories: [],
   services: [],
-  error: "GitHub organization data unavailable",
+  cloudflare: emptyCloudflare,
+  deployedCommit: null,
+  error: "Control Room data unavailable",
 };
 
 const formatTime = (value: string | null) => {
@@ -30,6 +39,8 @@ const formatTime = (value: string | null) => {
     minute: "2-digit",
   }).format(new Date(value));
 };
+
+const shortSha = (value: string | null) => (value ? value.slice(0, 7) : "—");
 
 const nextTheme: Record<ThemeMode, ThemeMode> = {
   system: "light",
@@ -56,7 +67,14 @@ const workflowTone = (run: RepositoryWorkflow | null) => {
   return "failure";
 };
 
+const cloudflareLabel = (status: OrganizationSnapshot["sources"]["cloudflare"]) => {
+  if (status === "connected") return "connected";
+  if (status === "degraded") return "partial";
+  return "read token not configured";
+};
+
 export default function App() {
+  const isWall = window.location.pathname === "/wall";
   const [data, setData] = useState<OrganizationSnapshot | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem("mira-control-room-theme");
@@ -64,31 +82,52 @@ export default function App() {
   });
 
   useEffect(() => {
+    if (isWall) {
+      document.documentElement.dataset.wall = "true";
+      return () => {
+        delete document.documentElement.dataset.wall;
+      };
+    }
+
+    delete document.documentElement.dataset.wall;
     if (theme === "system") {
       document.documentElement.removeAttribute("data-theme");
       localStorage.removeItem("mira-control-room-theme");
-      return;
+    } else {
+      document.documentElement.dataset.theme = theme;
+      localStorage.setItem("mira-control-room-theme", theme);
     }
-
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem("mira-control-room-theme", theme);
-  }, [theme]);
+  }, [isWall, theme]);
 
   useEffect(() => {
-    fetch("/api/summary")
-      .then(async (response) => {
-        const body = (await response.json()) as OrganizationSnapshot;
-        if (!response.ok) throw body;
-        return body;
-      })
-      .then(setData)
-      .catch((error) => {
-        if (error && typeof error === "object" && "organization" in error) {
-          setData(error as OrganizationSnapshot);
-          return;
-        }
-        setData(fallback);
-      });
+    let active = true;
+
+    const refresh = () => {
+      fetch("/api/summary", { cache: "no-store" })
+        .then(async (response) => {
+          const body = (await response.json()) as OrganizationSnapshot;
+          if (!response.ok) throw body;
+          return body;
+        })
+        .then((body) => {
+          if (active) setData(body);
+        })
+        .catch((error) => {
+          if (!active) return;
+          if (error && typeof error === "object" && "organization" in error) {
+            setData(error as OrganizationSnapshot);
+          } else if (!data) {
+            setData(fallback);
+          }
+        });
+    };
+
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   const view = data ?? fallback;
@@ -105,6 +144,10 @@ export default function App() {
         .at(-1) ?? null,
     [view.repositories],
   );
+  const buildsWithRuns = useMemo(
+    () => view.repositories.filter((repo) => Boolean(repo.latestWorkflow)).length,
+    [view.repositories],
+  );
   const healthyBuilds = useMemo(
     () =>
       view.repositories.filter(
@@ -116,29 +159,33 @@ export default function App() {
     () => view.services.filter((service) => service.status === "online").length,
     [view.services],
   );
+  const cloudflareAssets = view.cloudflare.workers.length + view.cloudflare.pages.length;
 
   return (
-    <main className="shell">
+    <main className={isWall ? "shell wall-shell" : "shell"}>
       <header className="topbar">
-        <div>
+        <div className="headline">
           <p className="eyebrow">MIRA / CONTROL ROOM</p>
-          <h1>Organization</h1>
+          <h1>{isWall ? "Mira System" : "Control Room"}</h1>
+          {!isWall && <p className="deck">Build, deploy and runtime state across the Mira organization.</p>}
         </div>
         <div className="header-actions">
-          <button
-            className="theme-toggle"
-            type="button"
-            onClick={() => setTheme(nextTheme[theme])}
-            aria-label={`Theme: ${theme}. Switch to ${nextTheme[theme]}.`}
-            title={`Theme: ${theme}`}
-          >
-            {theme}
-          </button>
+          {!isWall && (
+            <button
+              className="theme-toggle"
+              type="button"
+              onClick={() => setTheme(nextTheme[theme])}
+              aria-label={`Theme: ${theme}. Switch to ${nextTheme[theme]}.`}
+              title={`Theme: ${theme}`}
+            >
+              {theme}
+            </button>
+          )}
           <a className="org-link" href={view.organization.htmlUrl} target="_blank" rel="noreferrer">
             <span className={"beacon " + view.status} />
             <span>
-              <strong>{view.organization.login}</strong>
-              <small>{view.status === "connected" ? "System operational" : "Attention required"}</small>
+              <strong>{view.status === "connected" ? "SYSTEM OPERATIONAL" : "ATTENTION REQUIRED"}</strong>
+              <small>{view.organization.login} · {formatTime(view.generatedAt)}</small>
             </span>
           </a>
         </div>
@@ -146,11 +193,12 @@ export default function App() {
 
       <section className="source-strip" aria-label="Control Room data sources">
         <span><i className={"source-dot " + view.sources.github} /> GitHub · {view.sources.github}</span>
-        <span><i className="source-dot pending" /> Cloudflare · read token pending</span>
-        <small>snapshot {formatTime(view.generatedAt)}</small>
+        <span><i className={"source-dot " + view.sources.cloudflare} /> Cloudflare · {cloudflareLabel(view.sources.cloudflare)}</span>
+        <span><i className="source-dot connected" /> Runtime · live probes</span>
+        <small>refresh 60s · core cache 15m</small>
       </section>
 
-      <section className="metrics" aria-label="Organization metrics">
+      <section className="metrics" aria-label="System metrics">
         <article>
           <span>Repositories</span>
           <strong>{view.repositories.length}</strong>
@@ -158,18 +206,20 @@ export default function App() {
         </article>
         <article>
           <span>Builds passing</span>
-          <strong>{healthyBuilds}</strong>
+          <strong>{healthyBuilds}/{buildsWithRuns || "—"}</strong>
           <small>latest default-branch run</small>
         </article>
         <article>
           <span>Services online</span>
           <strong>{onlineServices}/{view.services.length || "—"}</strong>
-          <small>live HTTP probes</small>
+          <small>HTTP probes refresh live</small>
         </article>
         <article>
-          <span>Latest push</span>
-          <strong className="metric-time">{formatTime(lastPush)}</strong>
-          <small>across visible repos</small>
+          <span>{view.sources.cloudflare === "unconfigured" ? "Latest push" : "Cloudflare assets"}</span>
+          <strong className={view.sources.cloudflare === "unconfigured" ? "metric-time" : undefined}>
+            {view.sources.cloudflare === "unconfigured" ? formatTime(lastPush) : cloudflareAssets}
+          </strong>
+          <small>{view.sources.cloudflare === "unconfigured" ? "across visible repos" : "Mira Workers + Pages"}</small>
         </article>
       </section>
 
@@ -232,58 +282,136 @@ export default function App() {
         </div>
       </section>
 
-      <section className="repo-section">
+      <section className="cloudflare-section">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">LIVE / GITHUB</p>
-            <h2>Repositories</h2>
+            <p className="eyebrow">EDGE / CLOUDFLARE</p>
+            <h2>Deployments</h2>
           </div>
-          <small>{view.organization.publicRepos} public repositories</small>
+          <small>{cloudflareLabel(view.sources.cloudflare)}</small>
         </div>
 
-        {view.error ? (
-          <div className="error-state">
-            <strong>Organization data unavailable</strong>
-            <span>{view.error}</span>
+        {view.sources.cloudflare === "unconfigured" ? (
+          <div className="setup-row">
+            <span className="setup-mark">CF</span>
+            <div>
+              <strong>Cloudflare read model is ready</strong>
+              <p>Add the optional <code>CLOUDFLARE_READ_TOKEN</code> GitHub Actions secret. CI will sync it into the Worker runtime on the next deploy.</p>
+            </div>
+            <small>Workers Scripts: Read · Pages: Read</small>
           </div>
         ) : (
-          <div className="repo-table" role="table" aria-label="Mira repositories">
-            <div className="repo-row repo-head" role="row">
-              <span>Repository</span>
-              <span>Default</span>
-              <span>Build</span>
-              <span>Release</span>
-              <span>Last push</span>
+          <>
+            {view.cloudflare.errors.length > 0 && (
+              <div className="cf-warning">{view.cloudflare.errors.join(" · ")}</div>
+            )}
+            <div className="cf-grid">
+              <article className="cf-panel">
+                <div className="ops-title">
+                  <strong>Workers</strong>
+                  <small>{view.cloudflare.workers.length} Mira scripts</small>
+                </div>
+                <div className="ops-list">
+                  {view.cloudflare.workers.length === 0 ? (
+                    <div className="empty-row">No Mira Workers visible to this token.</div>
+                  ) : view.cloudflare.workers.map((worker) => (
+                    <div className="cf-row" key={worker.name}>
+                      <span className="ops-name">
+                        <strong>{worker.name}</strong>
+                        <small>{worker.source || "deployment"} · {formatTime(worker.deployedAt || worker.modifiedAt)}</small>
+                      </span>
+                      <span className="mono-value" title={worker.versionId || undefined}>{shortSha(worker.versionId)}</span>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="cf-panel">
+                <div className="ops-title">
+                  <strong>Pages</strong>
+                  <small>{view.cloudflare.pages.length} Mira projects</small>
+                </div>
+                <div className="ops-list">
+                  {view.cloudflare.pages.length === 0 ? (
+                    <div className="empty-row">No Mira Pages projects visible to this token.</div>
+                  ) : view.cloudflare.pages.map((page) => (
+                    <a
+                      className="cf-row"
+                      key={page.name}
+                      href={page.url || "#"}
+                      target={page.url ? "_blank" : undefined}
+                      rel={page.url ? "noreferrer" : undefined}
+                    >
+                      <span className="ops-name">
+                        <strong>{page.name}</strong>
+                        <small>{page.productionBranch || "production"} · {formatTime(page.deployedAt)}</small>
+                      </span>
+                      <span className="mono-value">{page.status || shortSha(page.commitHash)}</span>
+                    </a>
+                  ))}
+                </div>
+              </article>
             </div>
-            {view.repositories.map((repo) => (
-              <a
-                className="repo-row"
-                href={repo.htmlUrl}
-                target="_blank"
-                rel="noreferrer"
-                role="row"
-                key={repo.fullName}
-              >
-                <span className="repo-name">
-                  <strong>{repo.name}</strong>
-                  <small>{repo.description || `${repo.openIssuesCount} open issues · ${repo.language || "—"}`}</small>
-                </span>
-                <span data-label="Default"><code>{repo.defaultBranch}</code></span>
-                <span data-label="Build" className={"build-text " + workflowTone(repo.latestWorkflow)}>
-                  {workflowText(repo.latestWorkflow)}
-                </span>
-                <span data-label="Release">{repo.latestRelease?.tagName || "—"}</span>
-                <span data-label="Last push">{formatTime(repo.pushedAt)}</span>
-              </a>
-            ))}
-          </div>
+          </>
         )}
       </section>
 
-      <footer>
-        <span>GitHub is live · Cloudflare observability is next</span>
-        <span>Public read model · 15 min edge cache</span>
-      </footer>
+      {!isWall && (
+        <section className="repo-section">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">LIVE / GITHUB</p>
+              <h2>Repositories</h2>
+            </div>
+            <small>{view.organization.publicRepos} public repositories</small>
+          </div>
+
+          {view.error ? (
+            <div className="error-state">
+              <strong>Organization data unavailable</strong>
+              <span>{view.error}</span>
+            </div>
+          ) : (
+            <div className="repo-table" role="table" aria-label="Mira repositories">
+              <div className="repo-row repo-head" role="row">
+                <span>Repository</span>
+                <span>Default</span>
+                <span>Build</span>
+                <span>Release</span>
+                <span>Last push</span>
+              </div>
+              {view.repositories.map((repo) => (
+                <a
+                  className="repo-row"
+                  href={repo.htmlUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  role="row"
+                  key={repo.fullName}
+                >
+                  <span className="repo-name">
+                    <strong>{repo.name}</strong>
+                    <small>{repo.description || `${repo.openIssuesCount} open issues · ${repo.language || "—"}`}</small>
+                  </span>
+                  <span data-label="Default"><code>{repo.defaultBranch}</code></span>
+                  <span data-label="Build" className={"build-text " + workflowTone(repo.latestWorkflow)}>
+                    {workflowText(repo.latestWorkflow)}
+                  </span>
+                  <span data-label="Release">{repo.latestRelease?.tagName || "—"}</span>
+                  <span data-label="Last push">{formatTime(repo.pushedAt)}</span>
+                </a>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {!isWall && (
+        <footer>
+          <span>GitHub + runtime live · Cloudflare read adapter ready</span>
+          <span>{view.deployedCommit ? `build ${shortSha(view.deployedCommit)}` : "public read model"} · core cache 15m</span>
+        </footer>
+      )}
     </main>
   );
 }
