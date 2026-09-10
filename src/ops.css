@@ -144,6 +144,70 @@
 .service-state.degraded i { background: var(--warn); }
 .service-state.offline i { background: #c45b57; }
 
+.cf-analytics-bar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.45fr) repeat(3, minmax(120px, .55fr));
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+}
+
+.cf-analytics-bar > div {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  min-height: 82px;
+  padding: 14px 18px;
+}
+
+.cf-analytics-bar > div:first-child { padding-left: 0; }
+.cf-analytics-bar > div + div { border-left: 1px solid var(--line-soft); }
+
+.cf-analytics-label strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.cf-analytics-label small,
+.cf-analytics-bar > div:not(.cf-analytics-label) span,
+.cf-analytics-unavailable small {
+  color: var(--text-faint);
+  font: 560 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+  letter-spacing: .055em;
+}
+
+.cf-analytics-bar > div:not(.cf-analytics-label) strong {
+  font-size: 22px;
+  font-weight: 540;
+  letter-spacing: -.035em;
+}
+
+.cf-analytics-unavailable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 64px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cf-analytics-unavailable strong {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.cf-analytics-unavailable small {
+  max-width: 64%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 /* Keep unequal deployment lists at their natural content height too. */
 .cf-grid { align-items: start; }
 .cf-panel { align-self: start; }
@@ -161,6 +225,19 @@
 
   .source-strip > small { margin-left: 0; }
   .ops-grid { grid-template-columns: 1fr; }
+
+  .cf-analytics-bar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .cf-analytics-label {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .cf-analytics-bar > div:first-child { padding-left: 0; }
+  .cf-analytics-bar > div:nth-child(2) {
+    border-left: 0;
+    padding-left: 0;
+  }
 }
 
 @media (max-width: 520px) {
@@ -169,4 +246,18 @@
   .ops-panel { border-radius: 10px; }
   .ops-row { min-height: 60px; padding: 10px 13px; }
   .ops-section + .cloudflare-section { margin-top: 30px; }
+
+  .cf-analytics-bar > div { min-height: 72px; padding: 12px 10px; }
+  .cf-analytics-bar > div:not(.cf-analytics-label) strong { font-size: 18px; }
+  .cf-analytics-unavailable {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+    padding: 14px 0;
+  }
+  .cf-analytics-unavailable small {
+    max-width: none;
+    white-space: normal;
+    text-align: left;
+  }
 }
