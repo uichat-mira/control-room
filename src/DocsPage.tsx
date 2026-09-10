@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import {
   ArrowLeft,
   BookOpen,
@@ -80,9 +81,9 @@ export default function DocsPage() {
   return (
     <main className="docs-shell">
       <header className="docs-topbar">
-        <a className="docs-back" href="/">
+        <Link className="docs-back" to="/">
           <ArrowLeft size={15} /> Control Room
-        </a>
+        </Link>
         <span className="docs-kicker">MIRA / OPEN INTERFACE</span>
         <a className="docs-github" href="https://github.com/uichat-mira/control-room" target="_blank" rel="noreferrer">
           GitHub <ExternalLink size={13} />
@@ -194,7 +195,7 @@ export default function DocsPage() {
 
       <footer className="docs-footer">
         <span>Mira Control Room · open observability surface</span>
-        <a href="/">Back to cockpit</a>
+        <Link to="/">Back to cockpit</Link>
       </footer>
     </main>
   );
