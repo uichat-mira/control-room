@@ -3,10 +3,10 @@ name: Control Room CI / Deploy
 on:
   push:
     branches:
-      - main
+      - prod
   pull_request:
     branches:
-      - main
+      - prod
   workflow_dispatch:
 
 permissions:
@@ -42,7 +42,7 @@ jobs:
   deploy:
     name: Deploy
     needs: verify
-    if: github.event_name != 'pull_request' && github.ref_name == 'main'
+    if: github.event_name != 'pull_request' && github.ref_name == 'prod'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
