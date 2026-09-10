@@ -160,6 +160,7 @@ export default function App() {
     [view.services],
   );
   const cloudflareAssets = view.cloudflare.workers.length + view.cloudflare.pages.length;
+  const showCloudflareSection = !isWall || view.sources.cloudflare !== "unconfigured";
 
   return (
     <main className={isWall ? "shell wall-shell" : "shell"}>
@@ -282,83 +283,85 @@ export default function App() {
         </div>
       </section>
 
-      <section className="cloudflare-section">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">EDGE / CLOUDFLARE</p>
-            <h2>Deployments</h2>
-          </div>
-          <small>{cloudflareLabel(view.sources.cloudflare)}</small>
-        </div>
-
-        {view.sources.cloudflare === "unconfigured" ? (
-          <div className="setup-row">
-            <span className="setup-mark">CF</span>
+      {showCloudflareSection && (
+        <section className="cloudflare-section">
+          <div className="section-heading">
             <div>
-              <strong>Cloudflare read model is ready</strong>
-              <p>Add the optional <code>CLOUDFLARE_READ_TOKEN</code> GitHub Actions secret. CI will sync it into the Worker runtime on the next deploy.</p>
+              <p className="eyebrow">EDGE / CLOUDFLARE</p>
+              <h2>Deployments</h2>
             </div>
-            <small>Workers Scripts: Read · Pages: Read</small>
+            <small>{cloudflareLabel(view.sources.cloudflare)}</small>
           </div>
-        ) : (
-          <>
-            {view.cloudflare.errors.length > 0 && (
-              <div className="cf-warning">{view.cloudflare.errors.join(" · ")}</div>
-            )}
-            <div className="cf-grid">
-              <article className="cf-panel">
-                <div className="ops-title">
-                  <strong>Workers</strong>
-                  <small>{view.cloudflare.workers.length} Mira scripts</small>
-                </div>
-                <div className="ops-list">
-                  {view.cloudflare.workers.length === 0 ? (
-                    <div className="empty-row">No Mira Workers visible to this token.</div>
-                  ) : view.cloudflare.workers.map((worker) => (
-                    <div className="cf-row" key={worker.name}>
-                      <span className="ops-name">
-                        <strong>{worker.name}</strong>
-                        <small>{worker.source || "deployment"} · {formatTime(worker.deployedAt || worker.modifiedAt)}</small>
-                      </span>
-                      <span className="mono-value" title={worker.versionId || undefined}>{shortSha(worker.versionId)}</span>
-                    </div>
-                  ))}
-                </div>
-              </article>
 
-              <article className="cf-panel">
-                <div className="ops-title">
-                  <strong>Pages</strong>
-                  <small>{view.cloudflare.pages.length} Mira projects</small>
-                </div>
-                <div className="ops-list">
-                  {view.cloudflare.pages.length === 0 ? (
-                    <div className="empty-row">No Mira Pages projects visible to this token.</div>
-                  ) : view.cloudflare.pages.map((page) => {
-                    const content = (
-                      <>
-                        <span className="ops-name">
-                          <strong>{page.name}</strong>
-                          <small>{page.productionBranch || "production"} · {formatTime(page.deployedAt)}</small>
-                        </span>
-                        <span className="mono-value">{page.status || shortSha(page.commitHash)}</span>
-                      </>
-                    );
-
-                    return page.url ? (
-                      <a className="cf-row" key={page.name} href={page.url} target="_blank" rel="noreferrer">
-                        {content}
-                      </a>
-                    ) : (
-                      <div className="cf-row" key={page.name}>{content}</div>
-                    );
-                  })}
-                </div>
-              </article>
+          {view.sources.cloudflare === "unconfigured" ? (
+            <div className="setup-row">
+              <span className="setup-mark">CF</span>
+              <div>
+                <strong>Cloudflare read model is ready</strong>
+                <p>Add the optional <code>CLOUDFLARE_READ_TOKEN</code> GitHub Actions secret. CI will sync it into the Worker runtime on the next deploy.</p>
+              </div>
+              <small>Workers Scripts: Read · Pages: Read</small>
             </div>
-          </>
-        )}
-      </section>
+          ) : (
+            <>
+              {view.cloudflare.errors.length > 0 && (
+                <div className="cf-warning">{view.cloudflare.errors.join(" · ")}</div>
+              )}
+              <div className="cf-grid">
+                <article className="cf-panel">
+                  <div className="ops-title">
+                    <strong>Workers</strong>
+                    <small>{view.cloudflare.workers.length} Mira scripts</small>
+                  </div>
+                  <div className="ops-list">
+                    {view.cloudflare.workers.length === 0 ? (
+                      <div className="empty-row">No Mira Workers visible to this token.</div>
+                    ) : view.cloudflare.workers.map((worker) => (
+                      <div className="cf-row" key={worker.name}>
+                        <span className="ops-name">
+                          <strong>{worker.name}</strong>
+                          <small>{worker.source || "deployment"} · {formatTime(worker.deployedAt || worker.modifiedAt)}</small>
+                        </span>
+                        <span className="mono-value" title={worker.versionId || undefined}>{shortSha(worker.versionId)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+
+                <article className="cf-panel">
+                  <div className="ops-title">
+                    <strong>Pages</strong>
+                    <small>{view.cloudflare.pages.length} Mira projects</small>
+                  </div>
+                  <div className="ops-list">
+                    {view.cloudflare.pages.length === 0 ? (
+                      <div className="empty-row">No Mira Pages projects visible to this token.</div>
+                    ) : view.cloudflare.pages.map((page) => {
+                      const content = (
+                        <>
+                          <span className="ops-name">
+                            <strong>{page.name}</strong>
+                            <small>{page.productionBranch || "production"} · {formatTime(page.deployedAt)}</small>
+                          </span>
+                          <span className="mono-value">{page.status || shortSha(page.commitHash)}</span>
+                        </>
+                      );
+
+                      return page.url ? (
+                        <a className="cf-row" key={page.name} href={page.url} target="_blank" rel="noreferrer">
+                          {content}
+                        </a>
+                      ) : (
+                        <div className="cf-row" key={page.name}>{content}</div>
+                      );
+                    })}
+                  </div>
+                </article>
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       {!isWall && (
         <section className="repo-section">
@@ -370,12 +373,14 @@ export default function App() {
             <small>{view.organization.publicRepos} public repositories</small>
           </div>
 
-          {view.error ? (
+          {view.error && (
             <div className="error-state">
-              <strong>Organization data unavailable</strong>
+              <strong>GitHub data is temporarily degraded</strong>
               <span>{view.error}</span>
             </div>
-          ) : (
+          )}
+
+          {view.repositories.length > 0 ? (
             <div className="repo-table" role="table" aria-label="Mira repositories">
               <div className="repo-row repo-head" role="row">
                 <span>Repository</span>
@@ -406,7 +411,9 @@ export default function App() {
                 </a>
               ))}
             </div>
-          )}
+          ) : !view.error ? (
+            <div className="empty-row">No repository data available.</div>
+          ) : null}
         </section>
       )}
 
