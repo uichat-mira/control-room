@@ -5,6 +5,7 @@ import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
 
 const CORE_TTL_SECONDS = 15 * 60;
 const STALE_TTL_SECONDS = 24 * 60 * 60;
+const CLOUDFLARE_TTL_SECONDS = 5 * 60;
 const CORE_CACHE_SCHEMA = "v5";
 
 interface Env extends CloudflareEnv {
@@ -31,7 +32,7 @@ const json = (body: unknown, init: ResponseInit = {}) =>
     },
   });
 
-function cacheKeys(request: Request, env: Env) {
+function coreCacheKeys(request: Request, env: Env) {
   const url = new URL(request.url);
   const configState = env.CLOUDFLARE_READ_TOKEN ? "cf" : "no-cf";
   const prefix = `${url.origin}/api/__core-${CORE_CACHE_SCHEMA}-${configState}`;
@@ -41,8 +42,15 @@ function cacheKeys(request: Request, env: Env) {
   };
 }
 
-function cacheResponse(snapshot: CoreSnapshot, ttl: number) {
-  return new Response(JSON.stringify(snapshot), {
+function cloudflareCacheKey(request: Request, env: Env) {
+  const url = new URL(request.url);
+  const configState = env.CLOUDFLARE_READ_TOKEN ? "cf" : "no-cf";
+  const deploy = env.DEPLOYED_COMMIT ?? "local";
+  return new Request(`${url.origin}/api/__cloudflare-${deploy}-${configState}`, { method: "GET" });
+}
+
+function cacheResponse(value: unknown, ttl: number) {
+  return new Response(JSON.stringify(value), {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "cache-control": `public, max-age=60, s-maxage=${ttl}`,
@@ -50,11 +58,28 @@ function cacheResponse(snapshot: CoreSnapshot, ttl: number) {
   });
 }
 
-async function currentCore(env: Env): Promise<CoreSnapshot> {
+async function cachedCloudflare(request: Request, env: Env): Promise<CloudflareSnapshot> {
+  if (!env.CLOUDFLARE_ACCOUNT_ID || !env.CLOUDFLARE_READ_TOKEN) {
+    return getCloudflareSnapshot(env);
+  }
+
+  const workerCaches = caches as CacheStorage & { default: Cache };
+  const edgeCache = workerCaches.default;
+  const key = cloudflareCacheKey(request, env);
+  const cached = await edgeCache.match(key);
+  if (cached) return (await cached.json()) as CloudflareSnapshot;
+
+  const next = await getCloudflareSnapshot(env);
+  const ttl = next.status === "connected" ? CLOUDFLARE_TTL_SECONDS : 60;
+  await edgeCache.put(key, cacheResponse(next, ttl));
+  return next;
+}
+
+async function currentCore(request: Request, env: Env): Promise<CoreSnapshot> {
   const generatedAt = new Date().toISOString();
   const [github, cloudflare] = await Promise.all([
     getGitHubSnapshot(),
-    getCloudflareSnapshot(env),
+    cachedCloudflare(request, env),
   ]);
 
   return {
@@ -74,15 +99,23 @@ async function currentCore(env: Env): Promise<CoreSnapshot> {
 async function cachedCore(request: Request, env: Env): Promise<CoreSnapshot> {
   const workerCaches = caches as CacheStorage & { default: Cache };
   const edgeCache = workerCaches.default;
-  const keys = cacheKeys(request, env);
+  const keys = coreCacheKeys(request, env);
   const cached = await edgeCache.match(keys.fresh);
 
   if (cached) {
-    const snapshot = (await cached.json()) as CoreSnapshot;
-    return { ...snapshot, deployedCommit: env.DEPLOYED_COMMIT ?? null };
+    const [snapshot, cloudflare] = await Promise.all([
+      cached.json() as Promise<CoreSnapshot>,
+      cachedCloudflare(request, env),
+    ]);
+    return {
+      ...snapshot,
+      sources: { ...snapshot.sources, cloudflare: cloudflare.status },
+      cloudflare,
+      deployedCommit: env.DEPLOYED_COMMIT ?? null,
+    };
   }
 
-  const next = await currentCore(env);
+  const next = await currentCore(request, env);
   if (next.sources.github === "connected") {
     await Promise.all([
       edgeCache.put(keys.fresh, cacheResponse(next, CORE_TTL_SECONDS)),
@@ -131,7 +164,7 @@ async function summary(request: Request, env: Env): Promise<OrganizationSnapshot
   const serviceIssue = services.some((service) => service.status !== "online");
   const githubIssue = core.sources.github === "degraded";
   // Cloudflare is an observability source, not the service itself. Partial visibility
-  // (for example Workers visible but Pages denied) should not make Mira look unhealthy.
+  // should not make Mira look unhealthy when at least one CF resource family is visible.
   const cloudflareIssue =
     core.sources.cloudflare === "degraded" &&
     core.cloudflare.workers.length === 0 &&
