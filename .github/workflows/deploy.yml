@@ -168,6 +168,10 @@ jobs:
           const summary = JSON.parse(fs.readFileSync('/tmp/control-room-summary.json', 'utf8'));
           const governance = JSON.parse(fs.readFileSync('/tmp/control-room-governance.json', 'utf8'));
 
+          console.log(
+            `GitHub smoke: status=${summary.sources?.github ?? 'missing'}, repos=${summary.repositories?.length ?? 0}, error=${summary.error ?? 'none'}, governance=${governance.github?.governanceStatus ?? 'missing'}, projects=${governance.github?.projects?.status ?? 'missing'}`,
+          );
+
           if (health.ok !== true || health.service !== 'mira-control-room') {
             throw new Error('Unexpected Control Room health response');
           }
