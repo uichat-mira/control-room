@@ -76,7 +76,6 @@ jobs:
           # Reuse the organization shared Cloudflare key at runtime under the
           # read-adapter binding name. The adapter itself remains read-only.
           printf 'CLOUDFLARE_READ_TOKEN=%s\n' "$CLOUDFLARE_API_TOKEN" > /tmp/control-room-secrets.env
-          echo "EXPECT_CF_READ=1" >> "$GITHUB_ENV"
 
       - name: Deploy to Cloudflare
         shell: bash
@@ -96,9 +95,35 @@ jobs:
         run: |
           set -euo pipefail
 
-          curl --fail --silent --show-error --retry 8 --retry-delay 2 --retry-all-errors \
-            "${CONTROL_ROOM_URL}/api/health" --output /tmp/control-room-health.json
-          curl --fail --silent --show-error --retry 8 --retry-delay 2 --retry-all-errors \
+          ready=0
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error \
+              "${CONTROL_ROOM_URL}/api/health" --output /tmp/control-room-health.json; then
+              if node <<'NODE'
+          const fs = require('node:fs');
+          const health = JSON.parse(fs.readFileSync('/tmp/control-room-health.json', 'utf8'));
+          process.exit(
+            health.ok === true &&
+            health.service === 'mira-control-room' &&
+            health.commit === process.env.GITHUB_SHA ? 0 : 1
+          );
+          NODE
+              then
+                ready=1
+                break
+              fi
+            fi
+            echo "Waiting for Worker commit ${GITHUB_SHA} (attempt ${attempt}/12)..."
+            sleep 2
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            echo "Expected Worker commit did not become active in time."
+            cat /tmp/control-room-health.json || true
+            exit 1
+          fi
+
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
             "${CONTROL_ROOM_URL}/api/summary" --output /tmp/control-room-summary.json
 
           cat /tmp/control-room-health.json
@@ -111,7 +136,7 @@ jobs:
           if (health.ok !== true || health.service !== 'mira-control-room') {
             throw new Error('Unexpected Control Room health response');
           }
-          if (health.commit && health.commit !== process.env.GITHUB_SHA) {
+          if (health.commit !== process.env.GITHUB_SHA) {
             throw new Error(`Unexpected deployed commit: ${health.commit}`);
           }
           if (!summary.sources || !['connected', 'degraded'].includes(summary.sources.github)) {
@@ -131,7 +156,7 @@ jobs:
           }
 
           console.log(
-            `Smoke OK: ${summary.repositories.length} repos, ${summary.services.length} services, GitHub=${summary.sources.github}, CF=${summary.sources.cloudflare}`,
+            `Smoke OK: ${summary.repositories.length} repos, ${summary.services.length} services, GitHub=${summary.sources.github}, CF=${summary.sources.cloudflare}, Pages=${summary.cloudflare.pages.length}`,
           );
           NODE
 
