@@ -131,11 +131,12 @@ jobs:
           ready=0
           for attempt in $(seq 1 12); do
             if curl --fail --silent --show-error \
-              "${CONTROL_ROOM_URL}/api/health" --output /tmp/control-room-health.json; then
+              "${CONTROL_ROOM_URL}/api/v1/health" --output /tmp/control-room-health.json; then
               if node <<'NODE'
           const fs = require('node:fs');
           const health = JSON.parse(fs.readFileSync('/tmp/control-room-health.json', 'utf8'));
           process.exit(
+            health.apiVersion === 'v1' &&
             health.ok === true &&
             health.service === 'mira-control-room' &&
             health.commit === process.env.GITHUB_SHA ? 0 : 1
@@ -157,9 +158,11 @@ jobs:
           fi
 
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
-            "${CONTROL_ROOM_URL}/api/summary" --output /tmp/control-room-summary.json
+            "${CONTROL_ROOM_URL}/api/v1/summary" --output /tmp/control-room-summary.json
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
-            "${CONTROL_ROOM_URL}/api/governance" --output /tmp/control-room-governance.json
+            "${CONTROL_ROOM_URL}/api/v1/governance" --output /tmp/control-room-governance.json
+          curl --fail --silent --show-error --retry 3 --retry-delay 1 --retry-all-errors \
+            "${CONTROL_ROOM_URL}/openapi.json" --output /tmp/control-room-openapi.json
 
           cat /tmp/control-room-health.json
           node <<'NODE'
@@ -167,11 +170,18 @@ jobs:
           const health = JSON.parse(fs.readFileSync('/tmp/control-room-health.json', 'utf8'));
           const summary = JSON.parse(fs.readFileSync('/tmp/control-room-summary.json', 'utf8'));
           const governance = JSON.parse(fs.readFileSync('/tmp/control-room-governance.json', 'utf8'));
+          const openapi = JSON.parse(fs.readFileSync('/tmp/control-room-openapi.json', 'utf8'));
 
           console.log(
             `GitHub smoke: status=${summary.sources?.github ?? 'missing'}, repos=${summary.repositories?.length ?? 0}, error=${summary.error ?? 'none'}, governance=${governance.github?.governanceStatus ?? 'missing'}, governanceRepos=${governance.repositories?.length ?? 0}, projects=${governance.github?.projects?.status ?? 'missing'}`,
           );
 
+          if (health.apiVersion !== 'v1' || summary.apiVersion !== 'v1' || governance.apiVersion !== 'v1') {
+            throw new Error('Public API v1 marker is missing');
+          }
+          if (openapi.openapi !== '3.1.0' || openapi.info?.version !== '1.0.0') {
+            throw new Error('OpenAPI contract is invalid');
+          }
           if (health.ok !== true || health.service !== 'mira-control-room') {
             throw new Error('Unexpected Control Room health response');
           }
@@ -217,7 +227,7 @@ jobs:
             console.log(`Governance roster lag: live=${summary.repositories.length}, governance=${governance.repositories.length}`);
           }
           console.log(
-            `Smoke OK: ${summary.repositories.length} repos, ${summary.services.length} services, GitHub=${summary.sources.github}/${health.githubAuth}, Governance=${governance.github.governanceStatus}/${governance.repositories.length}, Projects=${governance.github.projects.status}/${governance.github.projects.items?.length ?? 0}, CF=${summary.sources.cloudflare}, Pages=${summary.cloudflare.pages.length}`,
+            `Smoke OK: api=v1, ${summary.repositories.length} repos, ${summary.services.length} services, GitHub=${summary.sources.github}/${health.githubAuth}, Governance=${governance.github.governanceStatus}/${governance.repositories.length}, Projects=${governance.github.projects.status}/${governance.github.projects.items?.length ?? 0}, CF=${summary.sources.cloudflare}, Pages=${summary.cloudflare.pages.length}`,
           );
           NODE
 

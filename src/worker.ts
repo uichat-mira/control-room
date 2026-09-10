@@ -5,6 +5,7 @@ import {
   type GitHubEnv,
   type GitHubGovernanceSnapshot,
 } from "./github";
+import { openApiDocument } from "./openapi";
 import { getServiceSnapshot } from "./services";
 import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
 
@@ -15,6 +16,7 @@ const STALE_TTL_SECONDS = 24 * 60 * 60;
 const CLOUDFLARE_TTL_SECONDS = 5 * 60;
 const CORE_CACHE_SCHEMA = "v8";
 const GOVERNANCE_CACHE_SCHEMA = "v2";
+const API_VERSION = "v1";
 
 interface Env extends CloudflareEnv, GitHubEnv {
   DEPLOYED_COMMIT?: string;
@@ -31,15 +33,41 @@ interface CoreSnapshot {
   error?: string;
 }
 
+const corsHeaders = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, OPTIONS",
+  "access-control-allow-headers": "Accept, Content-Type",
+  "access-control-max-age": "86400",
+  "x-content-type-options": "nosniff",
+};
+
 const json = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body, null, 2), {
     ...init,
     headers: {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
+      ...corsHeaders,
       ...init.headers,
     },
   });
+
+const publicApiJson = (body: unknown, init: ResponseInit = {}) =>
+  json(body, {
+    ...init,
+    headers: {
+      "cache-control": "public, max-age=30, s-maxage=60, stale-while-revalidate=300",
+      "x-mira-api-version": API_VERSION,
+      ...init.headers,
+    },
+  });
+
+function legacyHeaders(successor: string) {
+  return {
+    deprecation: "true",
+    link: `<${successor}>; rel=\"successor-version\"`,
+  };
+}
 
 function coreCacheKeys(request: Request, env: Env) {
   const url = new URL(request.url);
@@ -262,25 +290,140 @@ async function governanceView(request: Request, env: Env) {
   };
 }
 
+function health(env: Env) {
+  return {
+    ok: true,
+    service: "mira-control-room",
+    version: "0.2.0",
+    commit: env.DEPLOYED_COMMIT ?? null,
+    githubAuth: env.GITHUB_READ_TOKEN ? "authenticated" : "anonymous",
+    now: new Date().toISOString(),
+  };
+}
+
+function v1Envelope<T extends object>(payload: T) {
+  return { apiVersion: API_VERSION, ...payload };
+}
+
+async function v1Route(request: Request, env: Env, pathname: string): Promise<Response | null> {
+  if (pathname === "/api/v1") {
+    return publicApiJson({
+      apiVersion: API_VERSION,
+      name: "Mira Organization Observability API",
+      readOnly: true,
+      scope: "public-safe",
+      documentation: "/openapi.json",
+      endpoints: [
+        "/api/v1/health",
+        "/api/v1/summary",
+        "/api/v1/repos",
+        "/api/v1/builds",
+        "/api/v1/services",
+        "/api/v1/deployments",
+        "/api/v1/analytics",
+        "/api/v1/governance",
+        "/api/v1/projects",
+      ],
+    });
+  }
+
+  if (pathname === "/api/v1/health") {
+    return publicApiJson(v1Envelope(health(env)));
+  }
+
+  if (pathname === "/api/v1/summary") {
+    const snapshot = await summary(request, env);
+    return publicApiJson(v1Envelope(snapshot), {
+      headers: {
+        "x-mira-github": snapshot.sources.github,
+        "x-mira-github-auth": env.GITHUB_READ_TOKEN ? "authenticated" : "anonymous",
+        "x-mira-cloudflare": snapshot.sources.cloudflare,
+      },
+    });
+  }
+
+  if (["/api/v1/repos", "/api/v1/builds", "/api/v1/services", "/api/v1/deployments", "/api/v1/analytics"].includes(pathname)) {
+    const snapshot = await summary(request, env);
+
+    if (pathname === "/api/v1/repos") {
+      return publicApiJson(v1Envelope({ generatedAt: snapshot.generatedAt, status: snapshot.status, items: snapshot.repositories }));
+    }
+    if (pathname === "/api/v1/builds") {
+      return publicApiJson(v1Envelope({
+        generatedAt: snapshot.generatedAt,
+        status: snapshot.status,
+        items: snapshot.repositories.map((repo) => ({
+          repository: repo.fullName,
+          htmlUrl: repo.htmlUrl,
+          defaultBranch: repo.defaultBranch,
+          workflow: repo.latestWorkflow,
+          release: repo.latestRelease,
+        })),
+      }));
+    }
+    if (pathname === "/api/v1/services") {
+      return publicApiJson(v1Envelope({ generatedAt: snapshot.generatedAt, status: snapshot.status, items: snapshot.services }));
+    }
+    if (pathname === "/api/v1/deployments") {
+      return publicApiJson(v1Envelope({
+        generatedAt: snapshot.generatedAt,
+        status: snapshot.cloudflare.status,
+        workers: snapshot.cloudflare.workers,
+        pages: snapshot.cloudflare.pages,
+      }));
+    }
+    return publicApiJson(v1Envelope({ generatedAt: snapshot.generatedAt, ...snapshot.cloudflare.analytics24h }));
+  }
+
+  if (pathname === "/api/v1/governance" || pathname === "/api/v1/projects") {
+    const governance = await governanceView(request, env);
+    if (pathname === "/api/v1/projects") {
+      return publicApiJson(v1Envelope({
+        generatedAt: governance.generatedAt,
+        status: governance.github.projects.status,
+        items: governance.github.projects.items,
+        error: governance.github.projects.error,
+      }));
+    }
+    return publicApiJson(v1Envelope(governance));
+  }
+
+  return null;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/api/health") {
-      return json({
-        ok: true,
-        service: "mira-control-room",
-        version: "0.2.0",
-        commit: env.DEPLOYED_COMMIT ?? null,
-        githubAuth: env.GITHUB_READ_TOKEN ? "authenticated" : "anonymous",
-        now: new Date().toISOString(),
+    if (request.method === "OPTIONS" && (url.pathname.startsWith("/api/") || url.pathname === "/openapi.json")) {
+      return new Response(null, { status: 204, headers: corsHeaders });
+    }
+
+    if (request.method !== "GET") {
+      if (url.pathname.startsWith("/api/") || url.pathname === "/openapi.json") {
+        return json({ error: "method_not_allowed" }, { status: 405, headers: { allow: "GET, OPTIONS" } });
+      }
+      return new Response("Not Found", { status: 404 });
+    }
+
+    if (url.pathname === "/openapi.json" || url.pathname === "/api/v1/openapi.json") {
+      return publicApiJson(openApiDocument(url.origin), {
+        headers: { "cache-control": "public, max-age=300, s-maxage=3600" },
       });
+    }
+
+    const versioned = await v1Route(request, env, url.pathname);
+    if (versioned) return versioned;
+
+    if (url.pathname === "/api/health") {
+      return json(health(env), { headers: legacyHeaders("/api/v1/health") });
     }
 
     if (url.pathname === "/api/organization" || url.pathname === "/api/summary") {
       const snapshot = await summary(request, env);
       return json(snapshot, {
         headers: {
+          ...legacyHeaders("/api/v1/summary"),
           "x-mira-github": snapshot.sources.github,
           "x-mira-github-auth": env.GITHUB_READ_TOKEN ? "authenticated" : "anonymous",
           "x-mira-cloudflare": snapshot.sources.cloudflare,
@@ -289,7 +432,7 @@ export default {
     }
 
     if (url.pathname === "/api/governance") {
-      return json(await governanceView(request, env));
+      return json(await governanceView(request, env), { headers: legacyHeaders("/api/v1/governance") });
     }
 
     if (url.pathname.startsWith("/api/")) {

@@ -1,0 +1,229 @@
+export function openApiDocument(origin: string) {
+  const nullableString = { type: ["string", "null"] };
+  const status = { type: "string" };
+
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: "Mira Organization Observability API",
+      version: "1.0.0",
+      description:
+        "Read-only, public-safe observability projection for the uichat-mira GitHub organization and Mira runtime infrastructure.",
+    },
+    servers: [{ url: origin }],
+    tags: [
+      { name: "system", description: "API and system health" },
+      { name: "github", description: "Public GitHub organization projections" },
+      { name: "runtime", description: "Runtime probes and deployments" },
+      { name: "governance", description: "Public repository governance and Projects" },
+    ],
+    paths: {
+      "/api/v1": {
+        get: {
+          tags: ["system"],
+          summary: "API discovery",
+          responses: { "200": { description: "API metadata" } },
+        },
+      },
+      "/api/v1/health": {
+        get: {
+          tags: ["system"],
+          summary: "Control Room health",
+          responses: {
+            "200": {
+              description: "Healthy API process",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Health" } } },
+            },
+          },
+        },
+      },
+      "/api/v1/summary": {
+        get: {
+          tags: ["system"],
+          summary: "Organization operational summary",
+          description: "Primary public snapshot used by the Control Room UI. Upstream data is cached and may be stale during partial outages.",
+          responses: {
+            "200": {
+              description: "Operational snapshot",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Summary" } } },
+            },
+          },
+        },
+      },
+      "/api/v1/repos": {
+        get: {
+          tags: ["github"],
+          summary: "Public repositories",
+          responses: {
+            "200": {
+              description: "Repository projection",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/RepositoryList" } } },
+            },
+          },
+        },
+      },
+      "/api/v1/builds": {
+        get: {
+          tags: ["github"],
+          summary: "Latest default-branch build per public repository",
+          responses: { "200": { description: "Build projection" } },
+        },
+      },
+      "/api/v1/services": {
+        get: {
+          tags: ["runtime"],
+          summary: "Mira HTTP service probes",
+          responses: {
+            "200": {
+              description: "Service probes",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/ServiceList" } } },
+            },
+          },
+        },
+      },
+      "/api/v1/deployments": {
+        get: {
+          tags: ["runtime"],
+          summary: "Cloudflare Workers and Pages deployments",
+          responses: { "200": { description: "Deployment projection" } },
+        },
+      },
+      "/api/v1/analytics": {
+        get: {
+          tags: ["runtime"],
+          summary: "Cloudflare Workers last-24h analytics",
+          responses: { "200": { description: "24-hour requests and errors" } },
+        },
+      },
+      "/api/v1/governance": {
+        get: {
+          tags: ["governance"],
+          summary: "Public repository governance projection",
+          description: "Issues, pull requests, default-branch protection, rulesets, and public Projects. This is cached separately from live operational data.",
+          responses: { "200": { description: "Governance snapshot" } },
+        },
+      },
+      "/api/v1/projects": {
+        get: {
+          tags: ["governance"],
+          summary: "Public GitHub Projects",
+          responses: { "200": { description: "Public Project projection" } },
+        },
+      },
+      "/openapi.json": {
+        get: {
+          tags: ["system"],
+          summary: "OpenAPI 3.1 document",
+          responses: { "200": { description: "OpenAPI document" } },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        Health: {
+          type: "object",
+          required: ["apiVersion", "ok", "service", "version", "commit", "githubAuth", "now"],
+          properties: {
+            apiVersion: { const: "v1" },
+            ok: { type: "boolean" },
+            service: { type: "string" },
+            version: { type: "string" },
+            commit: nullableString,
+            githubAuth: { enum: ["authenticated", "anonymous"] },
+            now: { type: "string", format: "date-time" },
+          },
+        },
+        Workflow: {
+          type: ["object", "null"],
+          properties: {
+            name: { type: "string" },
+            status,
+            conclusion: nullableString,
+            htmlUrl: { type: "string", format: "uri" },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        Release: {
+          type: ["object", "null"],
+          properties: {
+            tagName: { type: "string" },
+            name: nullableString,
+            htmlUrl: { type: "string", format: "uri" },
+            publishedAt: { type: ["string", "null"], format: "date-time" },
+          },
+        },
+        Repository: {
+          type: "object",
+          required: ["name", "fullName", "htmlUrl", "visibility", "defaultBranch", "archived", "fork", "updatedAt", "openIssuesCount", "stars"],
+          properties: {
+            name: { type: "string" },
+            fullName: { type: "string" },
+            htmlUrl: { type: "string", format: "uri" },
+            description: nullableString,
+            visibility: { const: "public" },
+            defaultBranch: { type: "string" },
+            archived: { type: "boolean" },
+            fork: { type: "boolean" },
+            language: nullableString,
+            pushedAt: { type: ["string", "null"], format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
+            openIssuesCount: { type: "integer", minimum: 0 },
+            stars: { type: "integer", minimum: 0 },
+            latestWorkflow: { $ref: "#/components/schemas/Workflow" },
+            latestRelease: { $ref: "#/components/schemas/Release" },
+          },
+        },
+        Service: {
+          type: "object",
+          required: ["id", "label", "url", "status", "httpStatus", "latencyMs", "detail"],
+          properties: {
+            id: { type: "string" },
+            label: { type: "string" },
+            url: { type: "string", format: "uri" },
+            status: { enum: ["online", "degraded", "offline"] },
+            httpStatus: { type: ["integer", "null"] },
+            latencyMs: { type: ["integer", "null"] },
+            detail: { type: "string" },
+          },
+        },
+        Summary: {
+          type: "object",
+          required: ["apiVersion", "status", "generatedAt", "organization", "sources", "repositories", "services", "cloudflare", "deployedCommit"],
+          properties: {
+            apiVersion: { const: "v1" },
+            status: { enum: ["connected", "degraded"] },
+            generatedAt: { type: "string", format: "date-time" },
+            organization: { type: "object", additionalProperties: true },
+            sources: { type: "object", additionalProperties: true },
+            repositories: { type: "array", items: { $ref: "#/components/schemas/Repository" } },
+            services: { type: "array", items: { $ref: "#/components/schemas/Service" } },
+            cloudflare: { type: "object", additionalProperties: true },
+            deployedCommit: nullableString,
+            error: { type: "string" },
+          },
+        },
+        RepositoryList: {
+          type: "object",
+          required: ["apiVersion", "generatedAt", "status", "items"],
+          properties: {
+            apiVersion: { const: "v1" },
+            generatedAt: { type: "string", format: "date-time" },
+            status: { enum: ["connected", "degraded"] },
+            items: { type: "array", items: { $ref: "#/components/schemas/Repository" } },
+          },
+        },
+        ServiceList: {
+          type: "object",
+          required: ["apiVersion", "generatedAt", "status", "items"],
+          properties: {
+            apiVersion: { const: "v1" },
+            generatedAt: { type: "string", format: "date-time" },
+            status: { enum: ["connected", "degraded"] },
+            items: { type: "array", items: { $ref: "#/components/schemas/Service" } },
+          },
+        },
+      },
+    },
+  };
+}
