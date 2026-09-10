@@ -1,3 +1,4 @@
+import { handleMcpRequest } from "./mcp";
 import app from "./worker";
 
 type BaseEnv = Parameters<typeof app.fetch>[1];
@@ -13,6 +14,12 @@ type Env = BaseEnv & {
 
 const API_LIMIT_PER_MINUTE = 30;
 const HEALTH_LIMIT_PER_MINUTE = 120;
+const MCP_HOSTS = new Set([
+  "uichat-mira-control-room.dangjingtao.workers.dev",
+  "control.mira.tomz.io",
+  "localhost",
+  "127.0.0.1",
+]);
 
 function clientKey(request: Request) {
   const cloudflareIp = request.headers.get("cf-connecting-ip")?.trim();
@@ -31,7 +38,7 @@ async function isAllowed(binding: RateLimitBinding | undefined, key: string) {
   try {
     return (await binding.limit({ key })).success;
   } catch {
-    // The limiter protects the API but must not become a new availability dependency.
+    // The limiter protects the public surface but must not become a new availability dependency.
     return true;
   }
 }
@@ -77,23 +84,66 @@ function withPolicyHeader(response: Response, limit: number) {
   });
 }
 
+function validateMcpOrigin(request: Request): Response | null {
+  const requestHost = new URL(request.url).hostname.toLowerCase();
+  if (!MCP_HOSTS.has(requestHost)) {
+    return new Response("MCP host is not allowed", { status: 421 });
+  }
+
+  const origin = request.headers.get("origin");
+  if (!origin) return null;
+
+  try {
+    const originHost = new URL(origin).hostname.toLowerCase();
+    if (MCP_HOSTS.has(originHost)) return null;
+  } catch {
+    // Fall through to the same explicit rejection below.
+  }
+
+  return new Response("MCP origin is not allowed", { status: 403 });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url);
+    const apiRoute = pathname.startsWith("/api/");
+    const mcpRoute = pathname === "/mcp";
 
-    if (!pathname.startsWith("/api/") || request.method === "OPTIONS") {
+    if (!apiRoute && !mcpRoute) {
       return app.fetch(request, env);
+    }
+
+    if (mcpRoute) {
+      const rejected = validateMcpOrigin(request);
+      if (rejected) return rejected;
+    }
+
+    if (request.method === "OPTIONS") {
+      if (apiRoute) return app.fetch(request, env);
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+          "access-control-allow-headers": "Content-Type, Accept, MCP-Protocol-Version, Mcp-Method, Mcp-Name",
+          "access-control-max-age": "86400",
+        },
+      });
     }
 
     const healthRoute = pathname === "/api/health" || pathname === "/api/v1/health";
     const limit = healthRoute ? HEALTH_LIMIT_PER_MINUTE : API_LIMIT_PER_MINUTE;
     const limiter = healthRoute ? env.HEALTH_RATE_LIMITER : env.API_RATE_LIMITER;
-    const key = `${clientKey(request)}:${healthRoute ? "health" : "api"}`;
+    const key = healthRoute
+      ? `${clientKey(request)}:health`
+      : `${clientKey(request)}:public-read`;
 
     if (!(await isAllowed(limiter, key))) {
       return tooManyRequests(limit);
     }
 
-    return withPolicyHeader(await app.fetch(request, env), limit);
+    const response = mcpRoute
+      ? await handleMcpRequest(request, env)
+      : await app.fetch(request, env);
+    return withPolicyHeader(response, limit);
   },
 };

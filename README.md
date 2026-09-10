@@ -1,8 +1,8 @@
 # Mira Control Room
 
-Mira organization observability cockpit and public read API.
+Mira organization observability cockpit, public read API, and remote MCP surface.
 
-Control Room is a **read-only projection** of existing sources of truth. It must not become a second task ledger, release ledger, or deployment state store.
+Control Room is a **read-only projection** of existing sources of truth. It must not become a second task ledger, release ledger, deployment state store, or MCP-specific data store.
 
 ## V0.2
 
@@ -15,9 +15,11 @@ Control Room is a **read-only projection** of existing sources of truth. It must
 - Cloudflare Workers / Pages deployment read model
 - Cloudflare Workers 24h requests/errors analytics
 - Public repository governance and public GitHub Projects projection
+- Versioned Public API v1 + OpenAPI 3.1 contract
+- Remote read-only MCP endpoint
 - `/wall` large-screen mode with 60-second refresh
 
-GitHub / Cloudflare core metadata is edge-cached to protect upstream rate limits. Runtime health probes refresh on every summary request. Governance is fetched and cached separately so the live summary remains below Cloudflare Workers external-subrequest limits.
+GitHub, Cloudflare, governance, and runtime health are intentionally separate read paths. Focused Public API and MCP reads do not trigger unrelated service probes.
 
 ## Public API v1
 
@@ -38,6 +40,36 @@ Control Room exposes a versioned, read-only, public-safe API. It only projects p
 The v1 API allows cross-origin `GET` requests with `Access-Control-Allow-Origin: *`. Responses are cache-friendly and carry `x-mira-api-version: v1`.
 
 Legacy `GET /api/health`, `/api/summary`, `/api/organization`, and `/api/governance` remain temporarily available and return deprecation/successor headers. New clients should use `/api/v1/*`.
+
+## Remote MCP
+
+Control Room also exposes a stateless remote MCP server:
+
+```text
+https://uichat-mira-control-room.dangjingtao.workers.dev/mcp
+```
+
+It targets MCP `2026-07-28` with the official TypeScript server SDK v2 and keeps the SDK's stateless compatibility path for 2025-era clients.
+
+The MCP surface is deliberately small and task-oriented:
+
+- `get_overview`
+- `inspect_engineering` — repositories / builds / deployments
+- `inspect_runtime` — services / analytics
+- `inspect_governance` — governance / projects
+
+MCP reuses the Public API read model internally; it does not query GitHub or Cloudflare through a second implementation. See [`docs/MCP.md`](docs/MCP.md).
+
+## Abuse protection
+
+Cloudflare Worker Rate Limiting protects the public dynamic surfaces:
+
+- health: `120 requests / 60s / source IP`
+- all other Public API + MCP reads: `30 requests / 60s / source IP`, sharing one `public-read` bucket
+
+Exceeding the limit returns HTTP `429` with `Retry-After: 60`.
+
+Static `/openapi.json` is served as an asset and does not consume the Worker API limit. The MCP route additionally checks its request host and any supplied `Origin` header before protocol handling.
 
 ## Cloudflare read model
 
