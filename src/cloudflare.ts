@@ -1,3 +1,9 @@
+import {
+  getWorkerAnalytics24h,
+  unavailableAnalytics,
+  type CloudflareAnalytics24h,
+} from "./cloudflare-analytics";
+
 export type CloudflareSourceStatus = "connected" | "degraded" | "unconfigured";
 
 export interface CloudflareWorkerDeployment {
@@ -25,6 +31,7 @@ export interface CloudflareSnapshot {
   status: CloudflareSourceStatus;
   workers: CloudflareWorkerDeployment[];
   pages: CloudflarePageDeployment[];
+  analytics24h: CloudflareAnalytics24h;
   errors: string[];
 }
 
@@ -40,6 +47,11 @@ interface CloudflareEnvelope<T> {
   success: boolean;
   result: T;
   errors?: Array<{ code?: number; message?: string }>;
+}
+
+interface GraphQLEnvelope<T> {
+  data?: T;
+  errors?: Array<{ message?: string }> | null;
 }
 
 interface WorkerScript {
@@ -115,6 +127,39 @@ async function cloudflare<T>(env: CloudflareEnv, path: string): Promise<T> {
   return payload.result;
 }
 
+async function cloudflareGraphQL<T>(
+  env: CloudflareEnv,
+  query: string,
+  variables: Record<string, string>,
+): Promise<T> {
+  if (!env.CLOUDFLARE_READ_TOKEN) throw new Error("read credentials not configured");
+
+  const response = await fetch(`${API}/graphql`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.CLOUDFLARE_READ_TOKEN}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "User-Agent": "uichat-mira-control-room",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  let payload: GraphQLEnvelope<T> | null = null;
+  try {
+    payload = (await response.json()) as GraphQLEnvelope<T>;
+  } catch {
+    // handled below with the HTTP status only
+  }
+
+  const message = payload?.errors?.find((item) => item?.message)?.message;
+  if (!response.ok || !payload?.data || message) {
+    throw new Error(`HTTP ${response.status}${message ? ` · ${message}` : ""}`);
+  }
+
+  return payload.data;
+}
+
 async function workerSnapshot(env: CloudflareEnv): Promise<CloudflareWorkerDeployment[]> {
   const accountId = encodeURIComponent(env.CLOUDFLARE_ACCOUNT_ID!);
   const scripts = await cloudflare<WorkerScript[]>(env, `/accounts/${accountId}/workers/scripts`);
@@ -149,13 +194,7 @@ async function workerSnapshot(env: CloudflareEnv): Promise<CloudflareWorkerDeplo
 
 async function pagesSnapshot(env: CloudflareEnv): Promise<CloudflarePageDeployment[]> {
   const accountId = encodeURIComponent(env.CLOUDFLARE_ACCOUNT_ID!);
-  // Cloudflare validates Pages list pagination more strictly than the Workers API.
-  // The account has only a small number of Pages projects, so the default page is
-  // sufficient for the current read model and avoids invalid oversized per_page values.
-  const projects = await cloudflare<PagesProject[]>(
-    env,
-    `/accounts/${accountId}/pages/projects`,
-  );
+  const projects = await cloudflare<PagesProject[]>(env, `/accounts/${accountId}/pages/projects`);
 
   return projects
     .filter((project) => MIRA_NAME.test(project.name))
@@ -179,6 +218,7 @@ export async function getCloudflareSnapshot(env: CloudflareEnv): Promise<Cloudfl
       status: "unconfigured",
       workers: [],
       pages: [],
+      analytics24h: unavailableAnalytics(),
       errors: [],
     };
   }
@@ -195,10 +235,24 @@ export async function getCloudflareSnapshot(env: CloudflareEnv): Promise<Cloudfl
   if (workersResult.status === "rejected") errors.push(shortError("Workers", workersResult.reason));
   if (pagesResult.status === "rejected") errors.push(shortError("Pages", pagesResult.reason));
 
+  let analytics24h = unavailableAnalytics();
+  if (workersResult.status === "fulfilled") {
+    try {
+      analytics24h = await getWorkerAnalytics24h(
+        env.CLOUDFLARE_ACCOUNT_ID,
+        workers.map((worker) => worker.name),
+        <T>(query: string, variables: Record<string, string>) => cloudflareGraphQL<T>(env, query, variables),
+      );
+    } catch (error) {
+      analytics24h = unavailableAnalytics(shortError("Analytics", error));
+    }
+  }
+
   return {
     status: errors.length === 0 ? "connected" : "degraded",
     workers,
     pages,
+    analytics24h,
     errors,
   };
 }
