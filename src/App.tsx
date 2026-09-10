@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { OrganizationSnapshot } from "./shared";
+import type { OrganizationSnapshot, RepositoryWorkflow } from "./shared";
 
 type ThemeMode = "system" | "light" | "dark";
 
@@ -15,7 +15,9 @@ const fallback: OrganizationSnapshot = {
     publicRepos: 0,
     followers: 0,
   },
+  sources: { github: "degraded", cloudflare: "pending" },
   repositories: [],
+  services: [],
   error: "GitHub organization data unavailable",
 };
 
@@ -33,6 +35,25 @@ const nextTheme: Record<ThemeMode, ThemeMode> = {
   system: "light",
   light: "dark",
   dark: "system",
+};
+
+const workflowText = (run: RepositoryWorkflow | null) => {
+  if (!run) return "No runs";
+  if (run.status !== "completed") return run.status === "in_progress" ? "Running" : "Queued";
+  if (run.conclusion === "success") return "Passed";
+  if (run.conclusion === "cancelled") return "Cancelled";
+  if (run.conclusion === "skipped" || run.conclusion === "neutral") return "Neutral";
+  return run.conclusion ? run.conclusion.replaceAll("_", " ") : "Completed";
+};
+
+const workflowTone = (run: RepositoryWorkflow | null) => {
+  if (!run) return "muted";
+  if (run.status !== "completed") return "running";
+  if (run.conclusion === "success") return "success";
+  if (run.conclusion === "cancelled" || run.conclusion === "skipped" || run.conclusion === "neutral") {
+    return "muted";
+  }
+  return "failure";
 };
 
 export default function App() {
@@ -54,7 +75,7 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    fetch("/api/organization")
+    fetch("/api/summary")
       .then(async (response) => {
         const body = (await response.json()) as OrganizationSnapshot;
         if (!response.ok) throw body;
@@ -71,10 +92,6 @@ export default function App() {
   }, []);
 
   const view = data ?? fallback;
-  const prodRepos = useMemo(
-    () => view.repositories.filter((repo) => repo.defaultBranch === "prod").length,
-    [view.repositories],
-  );
   const activeRepos = useMemo(
     () => view.repositories.filter((repo) => !repo.archived).length,
     [view.repositories],
@@ -87,6 +104,17 @@ export default function App() {
         .sort()
         .at(-1) ?? null,
     [view.repositories],
+  );
+  const healthyBuilds = useMemo(
+    () =>
+      view.repositories.filter(
+        (repo) => repo.latestWorkflow?.status === "completed" && repo.latestWorkflow.conclusion === "success",
+      ).length,
+    [view.repositories],
+  );
+  const onlineServices = useMemo(
+    () => view.services.filter((service) => service.status === "online").length,
+    [view.services],
   );
 
   return (
@@ -110,11 +138,17 @@ export default function App() {
             <span className={"beacon " + view.status} />
             <span>
               <strong>{view.organization.login}</strong>
-              <small>{view.status === "connected" ? "GitHub connected" : "GitHub degraded"}</small>
+              <small>{view.status === "connected" ? "System operational" : "Attention required"}</small>
             </span>
           </a>
         </div>
       </header>
+
+      <section className="source-strip" aria-label="Control Room data sources">
+        <span><i className={"source-dot " + view.sources.github} /> GitHub · {view.sources.github}</span>
+        <span><i className="source-dot pending" /> Cloudflare · read token pending</span>
+        <small>snapshot {formatTime(view.generatedAt)}</small>
+      </section>
 
       <section className="metrics" aria-label="Organization metrics">
         <article>
@@ -123,14 +157,14 @@ export default function App() {
           <small>{activeRepos} active</small>
         </article>
         <article>
-          <span>Prod default</span>
-          <strong>{prodRepos}</strong>
-          <small>repositories</small>
+          <span>Builds passing</span>
+          <strong>{healthyBuilds}</strong>
+          <small>latest default-branch run</small>
         </article>
         <article>
-          <span>Public repos</span>
-          <strong>{view.organization.publicRepos}</strong>
-          <small>GitHub organization</small>
+          <span>Services online</span>
+          <strong>{onlineServices}/{view.services.length || "—"}</strong>
+          <small>live HTTP probes</small>
         </article>
         <article>
           <span>Latest push</span>
@@ -139,13 +173,72 @@ export default function App() {
         </article>
       </section>
 
+      <section className="ops-section">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">NOW / OPERATIONS</p>
+            <h2>Live state</h2>
+          </div>
+          <small>GitHub activity + runtime probes</small>
+        </div>
+
+        <div className="ops-grid">
+          <article className="ops-panel">
+            <div className="ops-title">
+              <strong>Builds</strong>
+              <small>default branch</small>
+            </div>
+            <div className="ops-list">
+              {view.repositories.map((repo) => (
+                <a
+                  className="ops-row"
+                  key={repo.fullName}
+                  href={repo.latestWorkflow?.htmlUrl || repo.htmlUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span className="ops-name">
+                    <strong>{repo.name}</strong>
+                    <small>{repo.latestWorkflow ? formatTime(repo.latestWorkflow.updatedAt) : repo.defaultBranch}</small>
+                  </span>
+                  <span className={"status-pill " + workflowTone(repo.latestWorkflow)}>
+                    {workflowText(repo.latestWorkflow)}
+                  </span>
+                </a>
+              ))}
+            </div>
+          </article>
+
+          <article className="ops-panel">
+            <div className="ops-title">
+              <strong>Services</strong>
+              <small>HTTP probe</small>
+            </div>
+            <div className="ops-list">
+              {view.services.map((service) => (
+                <a className="ops-row" key={service.id} href={service.url} target="_blank" rel="noreferrer">
+                  <span className="ops-name">
+                    <strong>{service.label}</strong>
+                    <small>{service.detail}</small>
+                  </span>
+                  <span className={"service-state " + service.status}>
+                    <i />
+                    {service.latencyMs === null ? service.status : `${service.latencyMs} ms`}
+                  </span>
+                </a>
+              ))}
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section className="repo-section">
         <div className="section-heading">
           <div>
             <p className="eyebrow">LIVE / GITHUB</p>
             <h2>Repositories</h2>
           </div>
-          <small>updated {formatTime(view.generatedAt)}</small>
+          <small>{view.organization.publicRepos} public repositories</small>
         </div>
 
         {view.error ? (
@@ -158,8 +251,8 @@ export default function App() {
             <div className="repo-row repo-head" role="row">
               <span>Repository</span>
               <span>Default</span>
-              <span>Language</span>
-              <span>Issues</span>
+              <span>Build</span>
+              <span>Release</span>
               <span>Last push</span>
             </div>
             {view.repositories.map((repo) => (
@@ -173,11 +266,13 @@ export default function App() {
               >
                 <span className="repo-name">
                   <strong>{repo.name}</strong>
-                  <small>{repo.description || repo.fullName}</small>
+                  <small>{repo.description || `${repo.openIssuesCount} open issues · ${repo.language || "—"}`}</small>
                 </span>
                 <span data-label="Default"><code>{repo.defaultBranch}</code></span>
-                <span data-label="Language">{repo.language || "—"}</span>
-                <span data-label="Issues">{repo.openIssuesCount}</span>
+                <span data-label="Build" className={"build-text " + workflowTone(repo.latestWorkflow)}>
+                  {workflowText(repo.latestWorkflow)}
+                </span>
+                <span data-label="Release">{repo.latestRelease?.tagName || "—"}</span>
                 <span data-label="Last push">{formatTime(repo.pushedAt)}</span>
               </a>
             ))}
@@ -186,8 +281,8 @@ export default function App() {
       </section>
 
       <footer>
-        <span>Source of truth: GitHub Organization</span>
-        <span>Cloudflare data intentionally disconnected</span>
+        <span>GitHub is live · Cloudflare observability is next</span>
+        <span>Public read model · 15 min edge cache</span>
       </footer>
     </main>
   );
