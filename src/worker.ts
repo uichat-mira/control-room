@@ -5,6 +5,7 @@ import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
 
 const CORE_TTL_SECONDS = 15 * 60;
 const STALE_TTL_SECONDS = 24 * 60 * 60;
+const CORE_CACHE_SCHEMA = "v5";
 
 interface Env extends CloudflareEnv {
   DEPLOYED_COMMIT?: string;
@@ -33,7 +34,7 @@ const json = (body: unknown, init: ResponseInit = {}) =>
 function cacheKeys(request: Request, env: Env) {
   const url = new URL(request.url);
   const configState = env.CLOUDFLARE_READ_TOKEN ? "cf" : "no-cf";
-  const prefix = `${url.origin}/api/__core-v4-${configState}`;
+  const prefix = `${url.origin}/api/__core-${CORE_CACHE_SCHEMA}-${configState}`;
   return {
     fresh: new Request(`${prefix}-fresh`, { method: "GET" }),
     stale: new Request(`${prefix}-stale`, { method: "GET" }),
