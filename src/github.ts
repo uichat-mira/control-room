@@ -12,8 +12,6 @@ import type {
 const ORG = "uichat-mira";
 const API = "https://api.github.com";
 const GRAPHQL = "https://api.github.com/graphql";
-const PAGE_SIZE = 100;
-const MAX_PAGES = 10;
 
 export interface GitHubEnv {
   GITHUB_READ_TOKEN?: string;
@@ -70,8 +68,8 @@ interface GitHubRelease {
   published_at: string | null;
 }
 
-interface GitHubIssueLike {
-  pull_request?: unknown;
+interface GitHubSearchResult {
+  total_count: number;
 }
 
 interface GitHubBranch {
@@ -116,6 +114,24 @@ export interface GitHubSnapshot {
   error?: string;
 }
 
+export interface GitHubGovernanceRepository {
+  name: string;
+  fullName: string;
+  htmlUrl: string;
+  defaultBranch: string;
+  governance: RepositoryGovernance;
+}
+
+export interface GitHubGovernanceSnapshot {
+  status: "connected" | "degraded";
+  generatedAt: string;
+  authenticated: boolean;
+  governanceStatus: "connected" | "partial";
+  projects: GitHubOrganizationObservability["projects"];
+  repositories: GitHubGovernanceRepository[];
+  error?: string;
+}
+
 function apiError(response: Response): string {
   const remaining = response.headers.get("x-ratelimit-remaining");
   const reset = response.headers.get("x-ratelimit-reset");
@@ -133,19 +149,6 @@ async function optional<T>(env: GitHubEnv, path: string): Promise<T | null> {
   if (response.status === 404) return null;
   if (!response.ok) return null;
   return response.json() as Promise<T>;
-}
-
-async function paged<T>(env: GitHubEnv, path: string): Promise<T[]> {
-  const output: T[] = [];
-  const separator = path.includes("?") ? "&" : "?";
-
-  for (let page = 1; page <= MAX_PAGES; page += 1) {
-    const rows = await request<T[]>(env, `${path}${separator}per_page=${PAGE_SIZE}&page=${page}`);
-    output.push(...rows);
-    if (rows.length < PAGE_SIZE) return output;
-  }
-
-  return output;
 }
 
 async function activity(env: GitHubEnv, repo: GitHubRepo): Promise<{
@@ -192,23 +195,29 @@ async function activity(env: GitHubEnv, repo: GitHubRepo): Promise<{
 async function governance(env: GitHubEnv, repo: GitHubRepo): Promise<RepositoryGovernance> {
   const repoName = encodeURIComponent(repo.name);
   const branchName = encodeURIComponent(repo.default_branch);
-  const [issuesResult, branchResult, rulesetsResult] = await Promise.allSettled([
-    paged<GitHubIssueLike>(env, `/repos/${ORG}/${repoName}/issues?state=open`),
+  const issueQuery = encodeURIComponent(`repo:${ORG}/${repo.name} is:issue is:open`);
+  const prQuery = encodeURIComponent(`repo:${ORG}/${repo.name} is:pr is:open`);
+
+  // Counts use Search total_count instead of paging every open issue. This keeps the
+  // governance read bounded under Workers Free's external subrequest ceiling.
+  const [issuesResult, prsResult, branchResult, rulesetsResult] = await Promise.allSettled([
+    request<GitHubSearchResult>(env, `/search/issues?q=${issueQuery}&per_page=1`),
+    request<GitHubSearchResult>(env, `/search/issues?q=${prQuery}&per_page=1`),
     request<GitHubBranch>(env, `/repos/${ORG}/${repoName}/branches/${branchName}`),
-    paged<GitHubRuleset>(env, `/repos/${ORG}/${repoName}/rulesets?includes_parents=true`),
+    request<GitHubRuleset[]>(env, `/repos/${ORG}/${repoName}/rulesets?includes_parents=true&per_page=100`),
   ]);
 
-  const issues = issuesResult.status === "fulfilled" ? issuesResult.value : null;
-  const branch = branchResult.status === "fulfilled" ? branchResult.value : null;
-  const rulesets = rulesetsResult.status === "fulfilled" ? rulesetsResult.value : null;
-  const failed = [issuesResult, branchResult, rulesetsResult].some((result) => result.status === "rejected");
+  const failed = [issuesResult, prsResult, branchResult, rulesetsResult].some((result) => result.status === "rejected");
 
   return {
     status: failed ? "partial" : "connected",
-    openIssues: issues ? issues.filter((item) => !item.pull_request).length : null,
-    openPullRequests: issues ? issues.filter((item) => Boolean(item.pull_request)).length : null,
-    defaultBranchProtected: branch?.protected ?? null,
-    activeRulesets: rulesets ? rulesets.filter((ruleset) => ruleset.enforcement === "active").length : null,
+    openIssues: issuesResult.status === "fulfilled" ? issuesResult.value.total_count : null,
+    openPullRequests: prsResult.status === "fulfilled" ? prsResult.value.total_count : null,
+    defaultBranchProtected: branchResult.status === "fulfilled" ? branchResult.value.protected : null,
+    activeRulesets:
+      rulesetsResult.status === "fulfilled"
+        ? rulesetsResult.value.filter((ruleset) => ruleset.enforcement === "active").length
+        : null,
   };
 }
 
@@ -284,29 +293,24 @@ export async function getGitHubSnapshot(env: GitHubEnv = {}): Promise<GitHubSnap
   const authenticated = Boolean(env.GITHUB_READ_TOKEN);
 
   try {
-    // Public-only is deliberate: Control Room is currently publicly reachable even when
-    // the organization token itself can see private repositories.
+    // Public-only is deliberate: the Worker is currently publicly reachable.
     const [organization, repositories] = await Promise.all([
       request<GitHubOrg>(env, `/orgs/${ORG}`),
       request<GitHubRepo[]>(env, `/orgs/${ORG}/repos?type=public&sort=updated&direction=desc&per_page=100`),
     ]);
-    const [activities, governanceRows, publicProjects] = await Promise.all([
-      Promise.all(repositories.map((repo) => activity(env, repo))),
-      Promise.all(repositories.map((repo) => governance(env, repo))),
-      projects(env),
-    ]);
-    const governanceStatus =
-      publicProjects.status === "connected" && governanceRows.every((row) => row.status === "connected")
-        ? "connected"
-        : "partial";
+    const activities = await Promise.all(repositories.map((repo) => activity(env, repo)));
 
     return {
       status: "connected",
       authenticated,
       github: {
         authenticated,
-        governanceStatus,
-        projects: publicProjects,
+        governanceStatus: "partial",
+        projects: {
+          status: "unavailable",
+          items: [],
+          error: "Governance is loaded separately",
+        },
       },
       organization: {
         login: organization.login,
@@ -333,7 +337,6 @@ export async function getGitHubSnapshot(env: GitHubEnv = {}): Promise<GitHubSnap
         stars: repo.stargazers_count,
         latestWorkflow: activities[index]?.latestWorkflow ?? null,
         latestRelease: activities[index]?.latestRelease ?? null,
-        governance: governanceRows[index],
       })),
     };
   } catch (error) {
@@ -356,6 +359,51 @@ export async function getGitHubSnapshot(env: GitHubEnv = {}): Promise<GitHubSnap
       },
       repositories: [],
       error: error instanceof Error ? error.message : "GitHub unavailable",
+    };
+  }
+}
+
+export async function getGitHubGovernanceSnapshot(env: GitHubEnv = {}): Promise<GitHubGovernanceSnapshot> {
+  const authenticated = Boolean(env.GITHUB_READ_TOKEN);
+  const generatedAt = new Date().toISOString();
+
+  try {
+    const repositories = await request<GitHubRepo[]>(
+      env,
+      `/orgs/${ORG}/repos?type=public&sort=updated&direction=desc&per_page=100`,
+    );
+    const [governanceRows, publicProjects] = await Promise.all([
+      Promise.all(repositories.map((repo) => governance(env, repo))),
+      projects(env),
+    ]);
+    const governanceStatus =
+      publicProjects.status === "connected" && governanceRows.every((row) => row.status === "connected")
+        ? "connected"
+        : "partial";
+
+    return {
+      status: "connected",
+      generatedAt,
+      authenticated,
+      governanceStatus,
+      projects: publicProjects,
+      repositories: repositories.map((repo, index) => ({
+        name: repo.name,
+        fullName: repo.full_name,
+        htmlUrl: repo.html_url,
+        defaultBranch: repo.default_branch,
+        governance: governanceRows[index],
+      })),
+    };
+  } catch (error) {
+    return {
+      status: "degraded",
+      generatedAt,
+      authenticated,
+      governanceStatus: "partial",
+      projects: { status: "unavailable", items: [], error: "GitHub governance unavailable" },
+      repositories: [],
+      error: error instanceof Error ? error.message : "GitHub governance unavailable",
     };
   }
 }
