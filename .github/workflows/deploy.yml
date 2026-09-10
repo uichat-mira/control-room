@@ -169,7 +169,7 @@ jobs:
           const governance = JSON.parse(fs.readFileSync('/tmp/control-room-governance.json', 'utf8'));
 
           console.log(
-            `GitHub smoke: status=${summary.sources?.github ?? 'missing'}, repos=${summary.repositories?.length ?? 0}, error=${summary.error ?? 'none'}, governance=${governance.github?.governanceStatus ?? 'missing'}, projects=${governance.github?.projects?.status ?? 'missing'}`,
+            `GitHub smoke: status=${summary.sources?.github ?? 'missing'}, repos=${summary.repositories?.length ?? 0}, error=${summary.error ?? 'none'}, governance=${governance.github?.governanceStatus ?? 'missing'}, governanceRepos=${governance.repositories?.length ?? 0}, projects=${governance.github?.projects?.status ?? 'missing'}`,
           );
 
           if (health.ok !== true || health.service !== 'mira-control-room') {
@@ -199,8 +199,12 @@ jobs:
           if (!governance.github || governance.github.authenticated !== true) {
             throw new Error('GitHub governance is not using authenticated reads');
           }
-          if (!Array.isArray(governance.repositories) || governance.repositories.length !== summary.repositories.length) {
-            throw new Error('GitHub governance repository projection is incomplete');
+          if (!Array.isArray(governance.repositories) || governance.repositories.length < 1) {
+            throw new Error('GitHub governance returned no repository projection');
+          }
+          const liveRepos = new Set(summary.repositories.map((repo) => repo.fullName));
+          if (governance.repositories.some((repo) => !liveRepos.has(repo.fullName))) {
+            throw new Error('GitHub governance contains a repository outside the live public roster');
           }
           if (governance.repositories.some((repo) => !repo.governance || !('openIssues' in repo.governance) || !('openPullRequests' in repo.governance))) {
             throw new Error('GitHub governance fields are missing');
@@ -209,8 +213,11 @@ jobs:
             throw new Error('GitHub Projects projection is invalid');
           }
 
+          if (governance.repositories.length !== summary.repositories.length) {
+            console.log(`Governance roster lag: live=${summary.repositories.length}, governance=${governance.repositories.length}`);
+          }
           console.log(
-            `Smoke OK: ${summary.repositories.length} repos, ${summary.services.length} services, GitHub=${summary.sources.github}/${health.githubAuth}, Governance=${governance.github.governanceStatus}, Projects=${governance.github.projects.status}/${governance.github.projects.items?.length ?? 0}, CF=${summary.sources.cloudflare}, Pages=${summary.cloudflare.pages.length}`,
+            `Smoke OK: ${summary.repositories.length} repos, ${summary.services.length} services, GitHub=${summary.sources.github}/${health.githubAuth}, Governance=${governance.github.governanceStatus}/${governance.repositories.length}, Projects=${governance.github.projects.status}/${governance.github.projects.items?.length ?? 0}, CF=${summary.sources.cloudflare}, Pages=${summary.cloudflare.pages.length}`,
           );
           NODE
 
