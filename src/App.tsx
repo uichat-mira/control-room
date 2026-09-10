@@ -3,10 +3,22 @@ import type { OrganizationSnapshot, RepositoryWorkflow } from "./shared";
 
 type ThemeMode = "system" | "light" | "dark";
 
+const now = new Date().toISOString();
+const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
 const emptyCloudflare = {
   status: "unconfigured" as const,
   workers: [],
   pages: [],
+  analytics24h: {
+    status: "unavailable" as const,
+    from: dayAgo,
+    to: now,
+    requests: 0,
+    errors: 0,
+    errorRate: 0,
+    workers: [],
+  },
   errors: [],
 };
 
@@ -39,6 +51,12 @@ const formatTime = (value: string | null) => {
     minute: "2-digit",
   }).format(new Date(value));
 };
+
+const formatCount = (value: number) =>
+  new Intl.NumberFormat(undefined, {
+    notation: value >= 10_000 ? "compact" : "standard",
+    maximumFractionDigits: 1,
+  }).format(value);
 
 const shortSha = (value: string | null) => (value ? value.slice(0, 7) : "—");
 
@@ -158,6 +176,10 @@ export default function App() {
   const onlineServices = useMemo(
     () => view.services.filter((service) => service.status === "online").length,
     [view.services],
+  );
+  const workerAnalytics = useMemo(
+    () => new Map(view.cloudflare.analytics24h.workers.map((worker) => [worker.name, worker])),
+    [view.cloudflare.analytics24h.workers],
   );
   const cloudflareAssets = view.cloudflare.workers.length + view.cloudflare.pages.length;
   const showCloudflareSection = !isWall || view.sources.cloudflare !== "unconfigured";
@@ -300,13 +322,40 @@ export default function App() {
                 <strong>Cloudflare read model is ready</strong>
                 <p>Add the optional <code>CLOUDFLARE_READ_TOKEN</code> GitHub Actions secret. CI will sync it into the Worker runtime on the next deploy.</p>
               </div>
-              <small>Workers Scripts: Read · Pages: Read</small>
+              <small>Workers Scripts: Read · Pages: Read · Account Analytics: Read</small>
             </div>
           ) : (
             <>
               {view.cloudflare.errors.length > 0 && (
                 <div className="cf-warning">{view.cloudflare.errors.join(" · ")}</div>
               )}
+
+              {view.cloudflare.analytics24h.status === "connected" ? (
+                <div className="cf-analytics-bar" aria-label="Cloudflare Workers last 24 hours">
+                  <div className="cf-analytics-label">
+                    <strong>Workers · last 24h</strong>
+                    <small>GraphQL Analytics</small>
+                  </div>
+                  <div>
+                    <span>Requests</span>
+                    <strong>{formatCount(view.cloudflare.analytics24h.requests)}</strong>
+                  </div>
+                  <div>
+                    <span>Errors</span>
+                    <strong>{formatCount(view.cloudflare.analytics24h.errors)}</strong>
+                  </div>
+                  <div>
+                    <span>Error rate</span>
+                    <strong>{view.cloudflare.analytics24h.errorRate.toFixed(3)}%</strong>
+                  </div>
+                </div>
+              ) : (
+                <div className="cf-analytics-unavailable">
+                  <strong>24h Workers analytics unavailable</strong>
+                  <small>{view.cloudflare.analytics24h.error || "Account Analytics: Read is not available to this token."}</small>
+                </div>
+              )}
+
               <div className="cf-grid">
                 <article className="cf-panel">
                   <div className="ops-title">
@@ -316,15 +365,22 @@ export default function App() {
                   <div className="ops-list">
                     {view.cloudflare.workers.length === 0 ? (
                       <div className="empty-row">No Mira Workers visible to this token.</div>
-                    ) : view.cloudflare.workers.map((worker) => (
-                      <div className="cf-row" key={worker.name}>
-                        <span className="ops-name">
-                          <strong>{worker.name}</strong>
-                          <small>{worker.source || "deployment"} · {formatTime(worker.deployedAt || worker.modifiedAt)}</small>
-                        </span>
-                        <span className="mono-value" title={worker.versionId || undefined}>{shortSha(worker.versionId)}</span>
-                      </div>
-                    ))}
+                    ) : view.cloudflare.workers.map((worker) => {
+                      const analytics = workerAnalytics.get(worker.name);
+                      const analyticsText = analytics
+                        ? ` · 24h ${formatCount(analytics.requests)} req / ${formatCount(analytics.errors)} err${analytics.truncated ? "+" : ""}`
+                        : "";
+
+                      return (
+                        <div className="cf-row" key={worker.name}>
+                          <span className="ops-name">
+                            <strong>{worker.name}</strong>
+                            <small>{worker.source || "deployment"} · {formatTime(worker.deployedAt || worker.modifiedAt)}{analyticsText}</small>
+                          </span>
+                          <span className="mono-value" title={worker.versionId || undefined}>{shortSha(worker.versionId)}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </article>
 
