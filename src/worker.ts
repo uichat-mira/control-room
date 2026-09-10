@@ -14,7 +14,7 @@ const GOVERNANCE_TTL_SECONDS = 30 * 60;
 const STALE_TTL_SECONDS = 24 * 60 * 60;
 const CLOUDFLARE_TTL_SECONDS = 5 * 60;
 const CORE_CACHE_SCHEMA = "v8";
-const GOVERNANCE_CACHE_SCHEMA = "v1";
+const GOVERNANCE_CACHE_SCHEMA = "v2";
 
 interface Env extends CloudflareEnv, GitHubEnv {
   DEPLOYED_COMMIT?: string;
