@@ -7,7 +7,7 @@ const AUTH_CORE_TTL_SECONDS = 15 * 60;
 const ANON_CORE_TTL_SECONDS = 30 * 60;
 const STALE_TTL_SECONDS = 24 * 60 * 60;
 const CLOUDFLARE_TTL_SECONDS = 5 * 60;
-const CORE_CACHE_SCHEMA = "v6";
+const CORE_CACHE_SCHEMA = "v7";
 
 interface Env extends CloudflareEnv, GitHubEnv {
   DEPLOYED_COMMIT?: string;
@@ -18,6 +18,7 @@ interface CoreSnapshot {
   organization: OrganizationSnapshot["organization"];
   sources: OrganizationSnapshot["sources"];
   repositories: OrganizationRepository[];
+  github?: OrganizationSnapshot["github"];
   cloudflare: CloudflareSnapshot;
   deployedCommit: string | null;
   error?: string;
@@ -92,6 +93,7 @@ async function currentCore(request: Request, env: Env): Promise<CoreSnapshot> {
       cloudflare: cloudflare.status,
     },
     repositories: github.repositories,
+    github: github.github,
     cloudflare,
     deployedCommit: env.DEPLOYED_COMMIT ?? null,
     error: github.error,
@@ -181,6 +183,25 @@ async function summary(request: Request, env: Env): Promise<OrganizationSnapshot
   };
 }
 
+async function governanceView(request: Request, env: Env) {
+  const core = await cachedCore(request, env);
+  return {
+    generatedAt: core.generatedAt,
+    organization: {
+      login: core.organization.login,
+      htmlUrl: core.organization.htmlUrl,
+    },
+    github: core.github,
+    repositories: core.repositories.map((repo) => ({
+      name: repo.name,
+      fullName: repo.fullName,
+      htmlUrl: repo.htmlUrl,
+      defaultBranch: repo.defaultBranch,
+      governance: repo.governance,
+    })),
+  };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -205,6 +226,10 @@ export default {
           "x-mira-cloudflare": snapshot.sources.cloudflare,
         },
       });
+    }
+
+    if (url.pathname === "/api/governance") {
+      return json(await governanceView(request, env));
     }
 
     if (url.pathname.startsWith("/api/")) {
