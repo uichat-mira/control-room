@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import "./docs-page.css";
 
-const BASE = "https://uichat-mira-control-room.dangjingtao.workers.dev";
+const BASE = "https://control.mira.tomz.io";
 const MCP_URL = `${BASE}/mcp`;
 
 const endpoints = [

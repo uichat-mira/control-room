@@ -4,6 +4,8 @@ Mira organization observability cockpit, public read API, and remote MCP surface
 
 Control Room is a **read-only projection** of existing sources of truth. It must not become a second task ledger, release ledger, deployment state store, or MCP-specific data store.
 
+Canonical production domain: `https://control.mira.tomz.io`
+
 ## V0.2
 
 - React + Vite cockpit UI
@@ -49,7 +51,7 @@ Legacy `GET /api/health`, `/api/summary`, `/api/organization`, and `/api/governa
 Control Room also exposes a stateless remote MCP server:
 
 ```text
-https://uichat-mira-control-room.dangjingtao.workers.dev/mcp
+https://control.mira.tomz.io/mcp
 ```
 
 It targets MCP `2026-07-28` with the official TypeScript server SDK v2 and keeps the SDK's stateless compatibility path for 2025-era clients.
