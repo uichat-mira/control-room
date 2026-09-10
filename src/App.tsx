@@ -1,9 +1,16 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import {
+  Navigate,
+  NavLink,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router";
+import {
   BookOpen,
   CircleDot,
   Gauge,
-  GitBranch,
   Monitor,
   Moon,
   Radio,
@@ -20,6 +27,7 @@ const Engineering = lazy(() => import("./Engineering"));
 const Runtime = lazy(() => import("./Runtime"));
 const Governance = lazy(() => import("./Governance"));
 const Wall = lazy(() => import("./Wall"));
+const DocsPage = lazy(() => import("./DocsPage"));
 
 const nextTheme: Record<ThemeMode, ThemeMode> = {
   system: "light",
@@ -66,11 +74,11 @@ const nav = [
   ["governance", "Governance", ShieldCheck],
 ] as const;
 
-function pageFor(pathname: string): PageKey {
+function pageKeyForPath(pathname: string): PageKey {
   const normalized = pathname !== "/" ? pathname.replace(/\/+$/, "") : pathname;
-  if (normalized === "/engineering") return "engineering";
-  if (normalized === "/runtime") return "runtime";
-  if (normalized === "/governance") return "governance";
+  if (normalized === routes.engineering.path) return "engineering";
+  if (normalized === routes.runtime.path) return "runtime";
+  if (normalized === routes.governance.path) return "governance";
   return "overview";
 }
 
@@ -89,10 +97,9 @@ function LoadingPage() {
   );
 }
 
-export default function App() {
-  const pathname = window.location.pathname;
-  const isWall = pathname === "/wall";
-  const page = pageFor(pathname);
+function ControlLayout() {
+  const { pathname } = useLocation();
+  const page = pageKeyForPath(pathname);
   const meta = routes[page];
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem("mira-control-room-theme");
@@ -100,13 +107,6 @@ export default function App() {
   });
 
   useEffect(() => {
-    if (isWall) {
-      document.documentElement.dataset.wall = "true";
-      return () => {
-        delete document.documentElement.dataset.wall;
-      };
-    }
-
     delete document.documentElement.dataset.wall;
     if (theme === "system") {
       document.documentElement.removeAttribute("data-theme");
@@ -115,31 +115,11 @@ export default function App() {
       document.documentElement.dataset.theme = theme;
       localStorage.setItem("mira-control-room-theme", theme);
     }
-  }, [isWall, theme]);
+  }, [theme]);
 
   useEffect(() => {
-    const previous = document.title;
-    document.title = isWall ? "Mira System · Control Room" : `${meta.title} · Mira Control Room`;
-    return () => {
-      document.title = previous;
-    };
-  }, [isWall, meta.title]);
-
-  if (isWall) {
-    return (
-      <Suspense fallback={<main className="shell wall-shell"><LoadingPage /></main>}>
-        <Wall />
-      </Suspense>
-    );
-  }
-
-  const Page = page === "engineering"
-    ? Engineering
-    : page === "runtime"
-      ? Runtime
-      : page === "governance"
-        ? Governance
-        : Overview;
+    document.title = `${meta.title} · Mira Control Room`;
+  }, [meta.title]);
 
   return (
     <main className="shell">
@@ -173,20 +153,25 @@ export default function App() {
       <nav className="control-nav" aria-label="Control Room sections">
         <div className="control-nav-main">
           {nav.map(([key, label, Icon]) => (
-            <a key={key} href={routes[key].path} className={page === key ? "active" : undefined}>
+            <NavLink
+              key={key}
+              to={routes[key].path}
+              end={key === "overview"}
+              className={({ isActive }) => isActive ? "active" : undefined}
+            >
               <Icon size={14} />
               {label}
-            </a>
+            </NavLink>
           ))}
         </div>
         <div className="control-nav-meta">
-          <a href="/docs"><BookOpen size={14} /> Docs</a>
-          <a href="/wall"><Monitor size={14} /> Wall</a>
+          <NavLink to="/docs"><BookOpen size={14} /> Docs</NavLink>
+          <NavLink to="/wall"><Monitor size={14} /> Wall</NavLink>
         </div>
       </nav>
 
       <Suspense fallback={<LoadingPage />}>
-        <Page />
+        <Outlet />
       </Suspense>
 
       <footer>
@@ -194,5 +179,49 @@ export default function App() {
         <span>API v1 · MCP · read-only</span>
       </footer>
     </main>
+  );
+}
+
+function WallRoute() {
+  useEffect(() => {
+    document.documentElement.dataset.wall = "true";
+    document.title = "Mira System · Control Room";
+    return () => {
+      delete document.documentElement.dataset.wall;
+    };
+  }, []);
+
+  return (
+    <Suspense fallback={<main className="shell wall-shell"><LoadingPage /></main>}>
+      <Wall />
+    </Suspense>
+  );
+}
+
+function DocsRoute() {
+  useEffect(() => {
+    delete document.documentElement.dataset.wall;
+  }, []);
+
+  return (
+    <Suspense fallback={<main className="shell"><LoadingPage /></main>}>
+      <DocsPage />
+    </Suspense>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route element={<ControlLayout />}>
+        <Route index element={<Overview />} />
+        <Route path="engineering" element={<Engineering />} />
+        <Route path="runtime" element={<Runtime />} />
+        <Route path="governance" element={<Governance />} />
+      </Route>
+      <Route path="docs" element={<DocsRoute />} />
+      <Route path="wall" element={<WallRoute />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
