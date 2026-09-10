@@ -144,6 +144,10 @@
 .service-state.degraded i { background: var(--warn); }
 .service-state.offline i { background: #c45b57; }
 
+/* Keep unequal deployment lists at their natural content height too. */
+.cf-grid { align-items: start; }
+.cf-panel { align-self: start; }
+
 /* Keep the next operational section visually attached to Live state. */
 .ops-section + .cloudflare-section { margin-top: 38px; }
 
