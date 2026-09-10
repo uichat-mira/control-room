@@ -64,12 +64,13 @@ Gateway v0 therefore:
 
 - accepts only repositories under `uichat-mira`;
 - accepts only same-repository PRs, matching the current Mobile review baseline;
-- fetches PR metadata directly from GitHub;
-- fetches the PR diff directly from GitHub;
-- fetches Organization `POLICY.md` and `OUTPUT-CONTRACT.md` from the configured trusted Organization policy ref;
+- fetches PR metadata directly from GitHub and freezes the observed base/head commit SHAs;
+- fetches the diff from GitHub's compare endpoint using that exact immutable base/head pair, so a concurrent push cannot silently change the packaged diff;
+- resolves the configured Organization policy ref to one immutable commit SHA before reading any policy file;
+- fetches Organization `POLICY.md` and `OUTPUT-CONTRACT.md` from that same policy commit;
 - fetches `.ai/review-profile.md` and `AGENTS.md` from the exact PR base SHA;
 - does not checkout or execute PR code;
-- records the blob SHA of every trusted control included in the package;
+- records the policy commit SHA and blob SHA of every trusted control included in the package;
 - records exact PR head and base SHA;
 - reports diff truncation and missing repo profile as explicit package gaps.
 
@@ -89,6 +90,8 @@ AI_REVIEW_POLICY_REF   optional, default: main
 
 `AI_REVIEW_GATEWAY_TOKEN` is a separate caller credential. A GitHub credential must not be reused as the bearer token sent to the Gateway.
 
+The current Wrangler deployment preserves Worker secrets that are not present in its deployment secrets file, so the caller token may be provisioned directly as a Worker secret without being copied into repository source.
+
 ## Review package identity
 
 The v0 response includes:
@@ -99,10 +102,12 @@ runtimeVersion
 repository + PR number
 base ref + base SHA
 head ref + head SHA
+resolved Organization policy commit SHA
 Organization policy blob SHA
 Output contract blob SHA
 Repo profile blob SHA (when present)
 Root AGENTS.md blob SHA (when present)
+exact compare-diff source pair
 diff truncation state
 package gaps
 ```
