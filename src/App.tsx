@@ -6,7 +6,6 @@ import {
   CircleDot,
   Cloud,
   GitBranch,
-  Github,
   GitPullRequest,
   Monitor,
   Moon,
@@ -254,7 +253,7 @@ export default function App() {
       </header>
 
       <section className="source-strip source-strip-icons" aria-label="Control Room data sources">
-        <span><Github size={13} /> GitHub · {view.sources.github}</span>
+        <span><GitBranch size={13} /> GitHub · {view.sources.github}</span>
         <span><Cloud size={13} /> Cloudflare · {cloudflareLabel(view.sources.cloudflare)}</span>
         <span><Radio size={13} /> Runtime · live probes</span>
         <small>refresh 60s</small>
