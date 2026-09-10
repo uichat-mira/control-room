@@ -34,25 +34,26 @@
 
 .ops-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, .75fr);
+  grid-template-columns: minmax(0, 1.18fr) minmax(0, .82fr);
   gap: 16px;
+  align-items: start;
   padding-top: 16px;
 }
 
 .ops-panel {
   min-width: 0;
+  align-self: start;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface);
   overflow: hidden;
 }
 
 .ops-title {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 48px;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 46px;
   padding: 0 16px;
   border-bottom: 1px solid var(--line-soft);
 }
@@ -62,10 +63,8 @@
   font-weight: 650;
 }
 
-.ops-title small {
-  color: var(--text-faint);
-  font-size: 11px;
-}
+/* Builds/Services do not have real table columns; avoid floating pseudo-headings. */
+.ops-section .ops-title small { display: none; }
 
 .ops-list { display: grid; }
 
@@ -145,6 +144,9 @@
 .service-state.degraded i { background: var(--warn); }
 .service-state.offline i { background: #c45b57; }
 
+/* Keep the next operational section visually attached to Live state. */
+.ops-section + .cloudflare-section { margin-top: 38px; }
+
 @media (max-width: 850px) {
   .source-strip {
     align-items: flex-start;
@@ -160,6 +162,7 @@
 @media (max-width: 520px) {
   .ops-section { margin-top: 34px; }
   .ops-grid { gap: 12px; padding-top: 12px; }
-  .ops-panel { border-radius: 12px; }
+  .ops-panel { border-radius: 10px; }
   .ops-row { min-height: 60px; padding: 10px 13px; }
+  .ops-section + .cloudflare-section { margin-top: 30px; }
 }
