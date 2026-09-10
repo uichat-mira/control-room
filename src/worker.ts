@@ -66,16 +66,21 @@ async function cachedCloudflare(request: Request, env: Env): Promise<CloudflareS
     return getCloudflareSnapshot(env);
   }
 
-  const workerCaches = caches as CacheStorage & { default: Cache };
-  const edgeCache = workerCaches.default;
-  const key = cloudflareCacheKey(request, env);
-  const cached = await edgeCache.match(key);
-  if (cached) return (await cached.json()) as CloudflareSnapshot;
+  try {
+    const workerCaches = caches as CacheStorage & { default: Cache };
+    const edgeCache = workerCaches.default;
+    const key = cloudflareCacheKey(request, env);
+    const cached = await edgeCache.match(key);
+    if (cached) return (await cached.json()) as CloudflareSnapshot;
 
-  const next = await getCloudflareSnapshot(env);
-  const ttl = next.status === "connected" ? CLOUDFLARE_TTL_SECONDS : 60;
-  await edgeCache.put(key, cacheResponse(next, ttl));
-  return next;
+    const next = await getCloudflareSnapshot(env);
+    const ttl = next.status === "connected" ? CLOUDFLARE_TTL_SECONDS : 60;
+    await edgeCache.put(key, cacheResponse(next, ttl));
+    return next;
+  } catch {
+    // Cache is an optimization, not an availability dependency.
+    return getCloudflareSnapshot(env);
+  }
 }
 
 async function currentCore(request: Request, env: Env): Promise<CoreSnapshot> {
@@ -145,6 +150,15 @@ async function cachedCore(request: Request, env: Env): Promise<CoreSnapshot> {
   };
 }
 
+async function resilientCore(request: Request, env: Env): Promise<CoreSnapshot> {
+  try {
+    return await cachedCore(request, env);
+  } catch {
+    // Never let Workers Cache make the read model unavailable.
+    return currentCore(request, env);
+  }
+}
+
 function buildFailed(repositories: OrganizationRepository[]): boolean {
   return repositories.some((repo) => {
     const run = repo.latestWorkflow;
@@ -165,7 +179,7 @@ function buildFailed(repositories: OrganizationRepository[]): boolean {
 }
 
 async function summary(request: Request, env: Env): Promise<OrganizationSnapshot> {
-  const [core, services] = await Promise.all([cachedCore(request, env), getServiceSnapshot()]);
+  const [core, services] = await Promise.all([resilientCore(request, env), getServiceSnapshot()]);
   const serviceIssue = services.some((service) => service.status !== "online");
   const githubIssue = core.sources.github === "degraded";
   const cloudflareIssue =
@@ -184,7 +198,7 @@ async function summary(request: Request, env: Env): Promise<OrganizationSnapshot
 }
 
 async function governanceView(request: Request, env: Env) {
-  const core = await cachedCore(request, env);
+  const core = await resilientCore(request, env);
   return {
     generatedAt: core.generatedAt,
     organization: {
