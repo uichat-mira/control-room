@@ -149,9 +149,12 @@ async function workerSnapshot(env: CloudflareEnv): Promise<CloudflareWorkerDeplo
 
 async function pagesSnapshot(env: CloudflareEnv): Promise<CloudflarePageDeployment[]> {
   const accountId = encodeURIComponent(env.CLOUDFLARE_ACCOUNT_ID!);
+  // Cloudflare validates Pages list pagination more strictly than the Workers API.
+  // The account has only a small number of Pages projects, so the default page is
+  // sufficient for the current read model and avoids invalid oversized per_page values.
   const projects = await cloudflare<PagesProject[]>(
     env,
-    `/accounts/${accountId}/pages/projects?per_page=100`,
+    `/accounts/${accountId}/pages/projects`,
   );
 
   return projects
