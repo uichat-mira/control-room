@@ -5,7 +5,7 @@ Mira Control Room exposes a remote, read-only MCP endpoint over the same product
 **Endpoint**
 
 ```text
-https://uichat-mira-control-room.dangjingtao.workers.dev/mcp
+https://control.mira.tomz.io/mcp
 ```
 
 The MCP server is an adapter over the existing Control Room Public API v1. It does not implement a separate GitHub, Cloudflare, service-probe, cache, or governance data plane.
@@ -116,7 +116,7 @@ curl -X POST \
   -H 'MCP-Protocol-Version: 2026-07-28' \
   -H 'Mcp-Method: tools/list' \
   --data '{"jsonrpc":"2.0","id":"demo","method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"demo-client","version":"1.0.0"}}}}' \
-  https://uichat-mira-control-room.dangjingtao.workers.dev/mcp
+  https://control.mira.tomz.io/mcp
 ```
 
 For a named operation such as `tools/call`, clients must also send the matching `Mcp-Name` header. The official SDK handles these protocol headers and `_meta` fields automatically; hand-written HTTP clients must keep the headers and JSON-RPC body consistent.
