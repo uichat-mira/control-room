@@ -14,7 +14,7 @@ The MCP server is an adapter over the existing Control Room Public API v1. It do
 
 The primary protocol target is MCP `2026-07-28` over stateless HTTP, implemented with the official TypeScript server SDK v2. The official handler also keeps stateless compatibility for 2025-era MCP clients.
 
-Control Room has no MCP session store. Every request is self-contained at the protocol layer.
+Control Room has no MCP session store. Every modern request is self-contained at the protocol layer. A `2026-07-28` request carries its protocol version and client capabilities in `params._meta`; the HTTP transport also carries `MCP-Protocol-Version` and `Mcp-Method` headers. Methods such as `tools/call` that identify a named object additionally use `Mcp-Name`.
 
 ## Tools
 
@@ -107,7 +107,7 @@ Agents should preserve source status such as `connected`, `degraded`, `partial`,
 
 ## Modern HTTP example
 
-A 2026-07-28 client can list tools with a self-contained request:
+A `2026-07-28` client can list tools with a single self-contained request:
 
 ```bash
 curl -X POST \
@@ -115,11 +115,24 @@ curl -X POST \
   -H 'Accept: application/json, text/event-stream' \
   -H 'MCP-Protocol-Version: 2026-07-28' \
   -H 'Mcp-Method: tools/list' \
-  --data '{"jsonrpc":"2.0","id":"demo","method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/clientInfo":{"name":"demo-client","version":"1.0.0"}}}}' \
+  --data '{"jsonrpc":"2.0","id":"demo","method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"demo-client","version":"1.0.0"}}}}' \
   https://uichat-mira-control-room.dangjingtao.workers.dev/mcp
 ```
 
+For a named operation such as `tools/call`, clients must also send the matching `Mcp-Name` header. The official SDK handles these protocol headers and `_meta` fields automatically; hand-written HTTP clients must keep the headers and JSON-RPC body consistent.
+
 For an MCP host that accepts remote HTTP servers, configure the endpoint URL above. The exact configuration shape is host-specific.
+
+## Agent usage guidance
+
+Prefer the narrowest capability that answers the question:
+
+1. repository/build/deployment question → `inspect_engineering`;
+2. service-health/traffic question → `inspect_runtime`;
+3. Issue/PR/policy/Project question → `inspect_governance`;
+4. genuinely cross-system question → `get_overview`.
+
+Do not repeatedly poll `get_overview` when a cached focused view is sufficient. Respect `429` and `Retry-After`, and do not retry degraded/partial upstream states as if they were transport failures.
 
 ## Design rule for future tools
 
