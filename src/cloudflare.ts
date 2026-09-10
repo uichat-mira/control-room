@@ -81,7 +81,7 @@ interface PagesProject {
 
 function shortError(scope: string, error: unknown): string {
   const message = error instanceof Error ? error.message : "unavailable";
-  return `${scope}: ${message}`.slice(0, 180);
+  return `${scope}: ${message}`.slice(0, 220);
 }
 
 async function cloudflare<T>(env: CloudflareEnv, path: string): Promise<T> {
@@ -92,6 +92,7 @@ async function cloudflare<T>(env: CloudflareEnv, path: string): Promise<T> {
   const response = await fetch(`${API}${path}`, {
     headers: {
       Authorization: `Bearer ${env.CLOUDFLARE_READ_TOKEN}`,
+      Accept: "application/json",
       "Content-Type": "application/json",
       "User-Agent": "uichat-mira-control-room",
     },
@@ -105,8 +106,10 @@ async function cloudflare<T>(env: CloudflareEnv, path: string): Promise<T> {
   }
 
   if (!response.ok || !payload?.success) {
-    const code = payload?.errors?.[0]?.code;
-    throw new Error(`HTTP ${response.status}${code ? ` / ${code}` : ""}`);
+    const first = payload?.errors?.[0];
+    const code = first?.code ? ` / ${first.code}` : "";
+    const message = first?.message ? ` · ${first.message}` : "";
+    throw new Error(`HTTP ${response.status}${code}${message}`);
   }
 
   return payload.result;
