@@ -1,13 +1,20 @@
 import { getCloudflareSnapshot, type CloudflareEnv, type CloudflareSnapshot } from "./cloudflare";
-import { getGitHubSnapshot, type GitHubEnv } from "./github";
+import {
+  getGitHubGovernanceSnapshot,
+  getGitHubSnapshot,
+  type GitHubEnv,
+  type GitHubGovernanceSnapshot,
+} from "./github";
 import { getServiceSnapshot } from "./services";
 import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
 
 const AUTH_CORE_TTL_SECONDS = 15 * 60;
 const ANON_CORE_TTL_SECONDS = 30 * 60;
+const GOVERNANCE_TTL_SECONDS = 30 * 60;
 const STALE_TTL_SECONDS = 24 * 60 * 60;
 const CLOUDFLARE_TTL_SECONDS = 5 * 60;
-const CORE_CACHE_SCHEMA = "v7";
+const CORE_CACHE_SCHEMA = "v8";
+const GOVERNANCE_CACHE_SCHEMA = "v1";
 
 interface Env extends CloudflareEnv, GitHubEnv {
   DEPLOYED_COMMIT?: string;
@@ -39,6 +46,16 @@ function coreCacheKeys(request: Request, env: Env) {
   const cfState = env.CLOUDFLARE_READ_TOKEN ? "cf" : "no-cf";
   const ghState = env.GITHUB_READ_TOKEN ? "gh-auth" : "gh-anon";
   const prefix = `${url.origin}/api/__core-${CORE_CACHE_SCHEMA}-${cfState}-${ghState}`;
+  return {
+    fresh: new Request(`${prefix}-fresh`, { method: "GET" }),
+    stale: new Request(`${prefix}-stale`, { method: "GET" }),
+  };
+}
+
+function governanceCacheKeys(request: Request, env: Env) {
+  const url = new URL(request.url);
+  const ghState = env.GITHUB_READ_TOKEN ? "gh-auth" : "gh-anon";
+  const prefix = `${url.origin}/api/__governance-${GOVERNANCE_CACHE_SCHEMA}-${ghState}`;
   return {
     fresh: new Request(`${prefix}-fresh`, { method: "GET" }),
     stale: new Request(`${prefix}-stale`, { method: "GET" }),
@@ -78,7 +95,6 @@ async function cachedCloudflare(request: Request, env: Env): Promise<CloudflareS
     await edgeCache.put(key, cacheResponse(next, ttl));
     return next;
   } catch {
-    // Cache is an optimization, not an availability dependency.
     return getCloudflareSnapshot(env);
   }
 }
@@ -154,8 +170,38 @@ async function resilientCore(request: Request, env: Env): Promise<CoreSnapshot> 
   try {
     return await cachedCore(request, env);
   } catch {
-    // Never let Workers Cache make the read model unavailable.
     return currentCore(request, env);
+  }
+}
+
+async function cachedGovernance(request: Request, env: Env): Promise<GitHubGovernanceSnapshot> {
+  try {
+    const workerCaches = caches as CacheStorage & { default: Cache };
+    const edgeCache = workerCaches.default;
+    const keys = governanceCacheKeys(request, env);
+    const cached = await edgeCache.match(keys.fresh);
+    if (cached) return (await cached.json()) as GitHubGovernanceSnapshot;
+
+    const next = await getGitHubGovernanceSnapshot(env);
+    if (next.status === "connected") {
+      await Promise.all([
+        edgeCache.put(keys.fresh, cacheResponse(next, GOVERNANCE_TTL_SECONDS)),
+        edgeCache.put(keys.stale, cacheResponse(next, STALE_TTL_SECONDS)),
+      ]);
+      return next;
+    }
+
+    const stale = await edgeCache.match(keys.stale);
+    if (!stale) return next;
+    const previous = (await stale.json()) as GitHubGovernanceSnapshot;
+    return {
+      ...previous,
+      status: "degraded",
+      governanceStatus: "partial",
+      error: next.error || "GitHub governance temporarily unavailable; showing last successful snapshot",
+    };
+  } catch {
+    return getGitHubGovernanceSnapshot(env);
   }
 }
 
@@ -198,21 +244,21 @@ async function summary(request: Request, env: Env): Promise<OrganizationSnapshot
 }
 
 async function governanceView(request: Request, env: Env) {
-  const core = await resilientCore(request, env);
+  const snapshot = await cachedGovernance(request, env);
   return {
-    generatedAt: core.generatedAt,
+    generatedAt: snapshot.generatedAt,
     organization: {
-      login: core.organization.login,
-      htmlUrl: core.organization.htmlUrl,
+      login: "uichat-mira",
+      htmlUrl: "https://github.com/uichat-mira",
     },
-    github: core.github,
-    repositories: core.repositories.map((repo) => ({
-      name: repo.name,
-      fullName: repo.fullName,
-      htmlUrl: repo.htmlUrl,
-      defaultBranch: repo.defaultBranch,
-      governance: repo.governance,
-    })),
+    github: {
+      authenticated: snapshot.authenticated,
+      governanceStatus: snapshot.governanceStatus,
+      projects: snapshot.projects,
+    },
+    repositories: snapshot.repositories,
+    status: snapshot.status,
+    error: snapshot.error,
   };
 }
 
