@@ -58,7 +58,7 @@ function safeIdentity(value: string | null) {
 
 function renderTaskContract(identity: TrustedTaskContractIdentity) {
   if (identity.state === "unavailable") {
-    return `unavailable (${safeInline(identity.reason)})`;
+    return `unavailable (${identity.reason})`;
   }
   return `${safeInline(identity.repository)}#${identity.issue} / ${safeInline(identity.updatedAt)} / ${safeInline(identity.contentSha256)}`;
 }
@@ -140,7 +140,7 @@ export function renderReviewComment(envelope: ReviewExecutionEnvelope) {
     "### Review metadata",
     `- **Repository:** ${safeInline(envelope.identity.repository)}`,
     `- **Pull request:** #${envelope.identity.pullRequest}`,
-    `- **Review mode:** ${safeInline(envelope.identity.reviewMode)}`,
+    `- **Review mode:** ${envelope.identity.reviewMode}`,
     `- **Base SHA:** ${safeInline(envelope.identity.baseSha)}`,
     `- **Head SHA:** ${safeInline(envelope.identity.headSha)}`,
     `- **Trusted Task / PR contract:** ${renderTaskContract(envelope.identity.taskContract)}`,
