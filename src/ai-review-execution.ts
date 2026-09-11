@@ -6,7 +6,7 @@ import type {
 import {
   buildReviewProviderRegistry,
   type AiReviewProviderEnv,
-  type ReviewProviderSlotState,
+  type ReviewRouteStatus,
 } from "./ai-review-provider-registry.ts";
 import {
   executeReviewWithFallback,
@@ -31,9 +31,10 @@ export interface ReviewExecutionEnvelope {
     rootContractBlobSha: string | null;
     taskContract: TrustedTaskContractIdentity;
   };
-  providerSlots: {
-    primary: ReviewProviderSlotState;
-    fallback: ReviewProviderSlotState;
+  providerRoute: {
+    routine: ReviewRouteStatus;
+    fallback?: ReviewRouteStatus;
+    escalation?: ReviewRouteStatus;
   };
   execution: ReviewExecutionResult;
 }
@@ -84,7 +85,7 @@ export async function executeTrustedReviewPackage(
   env: AiReviewProviderEnv,
   pkg: ReviewPackage,
 ): Promise<ReviewExecutionEnvelope> {
-  const registry = buildReviewProviderRegistry(env);
+  const registry = buildReviewProviderRegistry(env, pkg.reviewMode);
   const rawExecution = await executeReviewWithFallback(pkg, registry.providers);
   const execution = withDeterministicGaps(rawExecution, pkg);
 
@@ -92,7 +93,7 @@ export async function executeTrustedReviewPackage(
     executionVersion: REVIEW_EXECUTION_VERSION,
     executedAt: new Date().toISOString(),
     identity: reviewPackageIdentity(pkg),
-    providerSlots: registry.slots,
+    providerRoute: registry.route,
     execution,
   };
 }
