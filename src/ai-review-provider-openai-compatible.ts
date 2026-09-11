@@ -121,13 +121,13 @@ function normalizeOutputBudget(
 
 function normalizeRequestExtensions(
   value: OpenAICompatibleReviewProviderConfig["requestExtensions"],
-) {
+): { reasoningSplit?: true } | undefined {
   if (!value) return undefined;
   if (value.reasoningSplit !== undefined && typeof value.reasoningSplit !== "boolean") {
     throw new Error("Provider reasoningSplit request extension must be boolean.");
   }
   return {
-    ...(value.reasoningSplit === true ? { reasoningSplit: true } : {}),
+    ...(value.reasoningSplit === true ? { reasoningSplit: true as const } : {}),
   };
 }
 
