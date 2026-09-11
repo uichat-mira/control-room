@@ -6,6 +6,7 @@ on:
       - prod
     paths:
       - 'src/gateway.ts'
+      - 'src/ai-review-env.ts'
       - 'src/ai-review.ts'
       - 'src/ai-review-execution.ts'
       - 'src/ai-review-package.ts'
@@ -22,6 +23,7 @@ on:
       - prod
     paths:
       - 'src/gateway.ts'
+      - 'src/ai-review-env.ts'
       - 'src/ai-review.ts'
       - 'src/ai-review-execution.ts'
       - 'src/ai-review-package.ts'
