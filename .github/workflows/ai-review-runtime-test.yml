@@ -7,9 +7,12 @@ on:
     paths:
       - 'src/ai-review.ts'
       - 'src/ai-review-package.ts'
+      - 'src/ai-review-prompt.ts'
+      - 'src/ai-review-provider-*.ts'
       - 'src/ai-review-runtime.ts'
       - 'tests/ai-review-*.test.ts'
       - 'package.json'
+      - 'tsconfig.json'
       - '.github/workflows/ai-review-runtime-test.yml'
   push:
     branches:
@@ -17,9 +20,12 @@ on:
     paths:
       - 'src/ai-review.ts'
       - 'src/ai-review-package.ts'
+      - 'src/ai-review-prompt.ts'
+      - 'src/ai-review-provider-*.ts'
       - 'src/ai-review-runtime.ts'
       - 'tests/ai-review-*.test.ts'
       - 'package.json'
+      - 'tsconfig.json'
       - '.github/workflows/ai-review-runtime-test.yml'
 
 permissions:
