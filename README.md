@@ -21,6 +21,7 @@ Canonical production domain: `https://control.mira.tomz.io`
 - Versioned Public API v1 + OpenAPI 3.1 contract
 - Remote read-only MCP endpoint
 - Human-readable API/MCP docs at `/docs`
+- Cache-friendly GitHub Organization overview SVG at `/embed/github-overview.svg`
 - `/wall` large-screen mode with 60-second refresh
 
 GitHub, Cloudflare, governance, and runtime health are intentionally separate read paths. Focused Public API, MCP, and domain UI reads do not trigger unrelated service probes. Overview is the deliberate cross-domain exception because its job is to answer what needs attention now.
@@ -45,6 +46,18 @@ Control Room exposes a versioned, read-only, public-safe API. It only projects p
 The v1 API allows cross-origin `GET` requests with `Access-Control-Allow-Origin: *`. Responses are cache-friendly and carry `x-mira-api-version: v1`.
 
 Legacy `GET /api/health`, `/api/summary`, `/api/organization`, and `/api/governance` remain temporarily available and return deprecation/successor headers. New clients should use `/api/v1/*`.
+
+## GitHub Organization embed
+
+Control Room exposes a compact SVG projection intended for the Mira GitHub Organization profile and other read-only status surfaces:
+
+```text
+https://control.mira.tomz.io/embed/github-overview.svg
+```
+
+The image reuses the existing `/api/v1/summary` read model. It does not introduce a second collector or status store. It currently projects organization status, repository count, latest CI health, service health, GitHub/Cloudflare source state, and snapshot time.
+
+The embed is public and cacheable. It deliberately stays outside the per-client Public API rate-limit bucket because GitHub may fetch external images through shared proxy addresses; a short Worker edge cache prevents repeated organization and service probes from direct image requests.
 
 ## Remote MCP
 
@@ -74,7 +87,7 @@ Cloudflare Worker Rate Limiting protects the public dynamic surfaces:
 
 Exceeding the limit returns HTTP `429` with `Retry-After: 60`.
 
-Static `/openapi.json` is served as an asset and does not consume the Worker API limit. The MCP route additionally checks its request host and any supplied `Origin` header before protocol handling.
+Static `/openapi.json` is served as an asset and does not consume the Worker API limit. The GitHub Organization SVG embed is separately edge-cached and does not consume the per-client Public API limit. The MCP route additionally checks its request host and any supplied `Origin` header before protocol handling.
 
 ## Cloudflare read model
 
@@ -120,6 +133,7 @@ For authenticated GitHub reads, set `GITHUB_READ_TOKEN` locally. Never commit ei
 ```bash
 npm run typecheck
 npm run build
+npm run test:github-overview
 ```
 
 ## Deploy
