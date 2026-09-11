@@ -9,6 +9,7 @@
     "preview": "npm run build && vite preview",
     "typecheck": "tsc --noEmit",
     "test:ai-review": "node --test tests/ai-review-*.test.ts",
+    "test:github-overview": "node --test tests/github-overview.test.ts",
     "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
