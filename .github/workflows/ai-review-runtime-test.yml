@@ -1,20 +1,24 @@
-name: AI Review Runtime Tests
+name: AI Review Core Tests
 
 on:
   pull_request:
     branches:
       - prod
     paths:
+      - 'src/ai-review.ts'
+      - 'src/ai-review-package.ts'
       - 'src/ai-review-runtime.ts'
-      - 'tests/ai-review-runtime.test.ts'
+      - 'tests/ai-review-*.test.ts'
       - 'package.json'
       - '.github/workflows/ai-review-runtime-test.yml'
   push:
     branches:
       - prod
     paths:
+      - 'src/ai-review.ts'
+      - 'src/ai-review-package.ts'
       - 'src/ai-review-runtime.ts'
-      - 'tests/ai-review-runtime.test.ts'
+      - 'tests/ai-review-*.test.ts'
       - 'package.json'
       - '.github/workflows/ai-review-runtime-test.yml'
 
@@ -37,5 +41,5 @@ jobs:
       - name: Install
         run: npm install --no-audit --no-fund
 
-      - name: Run AI Review runtime contract tests
+      - name: Run AI Review core contract tests
         run: npm run test:ai-review
