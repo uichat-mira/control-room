@@ -29,6 +29,7 @@
             }
           },
           "reviewDefaults": {
+            "timeoutMs": 300000,
             "maxPromptCharacters": 250000,
             "maxOutputTokens": 16384,
             "outputTokenParameter": "max_completion_tokens"
