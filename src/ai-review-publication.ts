@@ -15,7 +15,7 @@ import type {
 
 export const MIRA_REVIEW_MARKER = "<!-- mira-ai-review:v1 -->" as const;
 export const REVIEW_OUTPUT_CONTRACT_VERSION = "mira-ai-review-output/v1" as const;
-export const MAX_REVIEW_COMMENT_CHARS = 60_000;
+export const MAX_REVIEW_COMMENT_BYTES = 60_000;
 
 export type ReviewStaleReason =
   | "repository"
@@ -100,24 +100,15 @@ export function renderReviewComment(envelope: ReviewExecutionEnvelope) {
 
   const review = envelope.execution.review;
   const provider = envelope.execution.provider;
-  const conflict = review.verdict === "CONTRACT_CONFLICT"
-    ? `\n\n${renderConflict(review.contractConflict)}`
-    : "";
-
-  const body = [
-    MIRA_REVIEW_MARKER,
-    "## Mira AI Review",
-    "",
+  const verdictSection = [
     "### Verdict",
     `\`${review.verdict}\``,
-    conflict,
-    "",
-    "### Findings",
-    renderFindings(review),
-    "",
-    "### Validation gaps",
-    renderValidationGaps(review),
-    "",
+    ...(review.verdict === "CONTRACT_CONFLICT"
+      ? [renderConflict(review.contractConflict)]
+      : []),
+  ].join("\n\n");
+
+  const metadataSection = [
     "### Review metadata",
     `- **Repository:** ${safeInline(envelope.identity.repository)}`,
     `- **Pull request:** #${envelope.identity.pullRequest}`,
@@ -135,13 +126,21 @@ export function renderReviewComment(envelope: ReviewExecutionEnvelope) {
     `- **Package:** ${REVIEW_PACKAGE_VERSION}`,
     `- **Execution:** ${REVIEW_EXECUTION_VERSION}`,
     `- **Executed at:** ${safeInline(envelope.executedAt)}`,
-  ]
-    .filter((line) => line !== "")
-    .join("\n");
+  ].join("\n");
 
-  if (body.length > MAX_REVIEW_COMMENT_CHARS) {
+  const body = [
+    MIRA_REVIEW_MARKER,
+    "## Mira AI Review",
+    verdictSection,
+    ["### Findings", renderFindings(review)].join("\n\n"),
+    ["### Validation gaps", renderValidationGaps(review)].join("\n\n"),
+    metadataSection,
+  ].join("\n\n");
+
+  const bodyBytes = new TextEncoder().encode(body).byteLength;
+  if (bodyBytes > MAX_REVIEW_COMMENT_BYTES) {
     throw new ReviewPublicationError(
-      `Rendered review exceeds the ${MAX_REVIEW_COMMENT_CHARS}-character publication limit.`,
+      `Rendered review exceeds the ${MAX_REVIEW_COMMENT_BYTES}-byte publication limit.`,
     );
   }
 
