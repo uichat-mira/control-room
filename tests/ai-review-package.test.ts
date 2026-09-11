@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Buffer } from "node:buffer";
 
-import { buildReviewPackageData } from "../src/ai-review.ts";
-import { ReviewPackageError } from "../src/ai-review-package.ts";
+import {
+  ReviewPackageError,
+  buildReviewPackageData,
+} from "../src/ai-review-package.ts";
 
 const BASE_SHA = "1111111111111111111111111111111111111111";
 const HEAD_SHA = "2222222222222222222222222222222222222222";
