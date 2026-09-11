@@ -11,7 +11,10 @@ export const MAX_REVIEW_DIFF_CHARS = 180_000;
 
 export type ReviewMode = "CODE_REVIEW" | "PROMOTION_REVIEW" | "RELEASE_REVIEW";
 
-export type ReviewPackageGapCode = "missing_repository_profile" | "diff_truncated";
+export type ReviewPackageGapCode =
+  | "missing_repository_profile"
+  | "diff_truncated"
+  | "trusted_task_contract_unavailable";
 
 export interface ReviewPackageGap {
   code: ReviewPackageGapCode;
@@ -279,6 +282,14 @@ function truncatedDiffGap(): ReviewPackageGap {
   };
 }
 
+function unavailableTaskContractGap(): ReviewPackageGap {
+  return {
+    code: "trusted_task_contract_unavailable",
+    message: "Trusted Task / PR Contract lookup is not configured; highest-priority task instructions may be unavailable to the reviewer.",
+    material: true,
+  };
+}
+
 export async function buildReviewPackageData(
   env: AiReviewPackageEnv,
   repository: string,
@@ -346,6 +357,10 @@ export async function buildReviewPackageData(
 
   const diffTruncated = rawDiff.length > MAX_REVIEW_DIFF_CHARS;
   const diff = diffTruncated ? rawDiff.slice(0, MAX_REVIEW_DIFF_CHARS) : rawDiff;
+  const taskContract: TrustedTaskContractIdentity = {
+    state: "unavailable",
+    reason: "trusted_lookup_not_configured",
+  };
 
   return {
     packageVersion: REVIEW_PACKAGE_VERSION,
@@ -380,10 +395,7 @@ export async function buildReviewPackageData(
         outputContractBlobSha: outputContract.blobSha,
         profileBlobSha: profile?.blobSha ?? null,
         rootContractBlobSha: rootContract?.blobSha ?? null,
-        taskContract: {
-          state: "unavailable",
-          reason: "trusted_lookup_not_configured",
-        },
+        taskContract,
       },
     },
     diff: {
@@ -397,6 +409,7 @@ export async function buildReviewPackageData(
     gaps: [
       ...(profile ? [] : [missingProfileGap()]),
       ...(diffTruncated ? [truncatedDiffGap()] : []),
+      ...(taskContract.state === "unavailable" ? [unavailableTaskContractGap()] : []),
     ],
   };
 }
