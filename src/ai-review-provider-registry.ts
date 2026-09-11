@@ -76,6 +76,9 @@ function openAiProvider(
     apiKey,
     model: model.modelId,
     responseFormat: model.capabilities?.responseFormat ?? "none",
+    ...(model.driverOptions?.openaiChat?.reasoningSplit === true
+      ? { requestExtensions: { reasoningSplit: true } }
+      : {}),
     ...(model.reviewDefaults?.maxPromptCharacters !== undefined
       ? {
           inputBudget: {
