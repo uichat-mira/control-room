@@ -9,6 +9,29 @@ export const REVIEW_PACKAGE_VERSION = "mira-ai-review-package/v0" as const;
 export const AI_REVIEW_RUNTIME_VERSION = "control-room-ai-review/v0" as const;
 export const MAX_REVIEW_DIFF_CHARS = 180_000;
 
+export type ReviewMode = "CODE_REVIEW" | "PROMOTION_REVIEW" | "RELEASE_REVIEW";
+
+export type ReviewPackageGapCode = "missing_repository_profile" | "diff_truncated";
+
+export interface ReviewPackageGap {
+  code: ReviewPackageGapCode;
+  message: string;
+  material: boolean;
+}
+
+export type TrustedTaskContractIdentity =
+  | {
+      state: "unavailable";
+      reason: "trusted_lookup_not_configured";
+    }
+  | {
+      state: "resolved";
+      repository: string;
+      issue: number;
+      updatedAt: string;
+      contentSha256: string;
+    };
+
 export interface AiReviewPackageEnv {
   GITHUB_READ_TOKEN?: string;
   AI_REVIEW_POLICY_REF?: string;
@@ -57,6 +80,7 @@ export interface ReviewPackage {
   packageVersion: typeof REVIEW_PACKAGE_VERSION;
   runtimeVersion: typeof AI_REVIEW_RUNTIME_VERSION;
   generatedAt: string;
+  reviewMode: ReviewMode;
   trust: {
     headIsUntrusted: true;
     executesPullRequestCode: false;
@@ -85,6 +109,7 @@ export interface ReviewPackage {
       outputContractBlobSha: string;
       profileBlobSha: string | null;
       rootContractBlobSha: string | null;
+      taskContract: TrustedTaskContractIdentity;
     };
   };
   diff: {
@@ -95,7 +120,7 @@ export interface ReviewPackage {
     truncated: boolean;
     limitChars: number;
   };
-  gaps: string[];
+  gaps: ReviewPackageGap[];
 }
 
 export type ReviewPackageErrorCode =
@@ -103,7 +128,8 @@ export type ReviewPackageErrorCode =
   | "invalid_repository"
   | "invalid_pull_request"
   | "repository_mismatch"
-  | "fork_pull_request_not_supported";
+  | "fork_pull_request_not_supported"
+  | "unsupported_review_mode";
 
 export class ReviewPackageError extends Error {
   readonly code: ReviewPackageErrorCode;
@@ -225,6 +251,34 @@ function validateReviewTarget(repository: string, pullRequest: number) {
   }
 }
 
+function reviewModeFor(pr: GitHubPullRequest): ReviewMode {
+  if (pr.base.ref === "dev" && pr.head.ref.startsWith("feat/")) return "CODE_REVIEW";
+  if (pr.base.ref === "test" && pr.head.ref === "dev") return "PROMOTION_REVIEW";
+  if (pr.base.ref === "prod" && pr.head.ref === "test") return "RELEASE_REVIEW";
+
+  throw new ReviewPackageError(
+    "unsupported_review_mode",
+    409,
+    `Unsupported review branch transition: ${pr.head.ref} -> ${pr.base.ref}.`,
+  );
+}
+
+function missingProfileGap(): ReviewPackageGap {
+  return {
+    code: "missing_repository_profile",
+    message: `Missing ${PROFILE_PATH} at base SHA; repository-specific review rules are not yet migrated.`,
+    material: true,
+  };
+}
+
+function truncatedDiffGap(): ReviewPackageGap {
+  return {
+    code: "diff_truncated",
+    message: `PR diff exceeded ${MAX_REVIEW_DIFF_CHARS} characters and was truncated by Review Gateway v0.`,
+    material: true,
+  };
+}
+
 export async function buildReviewPackageData(
   env: AiReviewPackageEnv,
   repository: string,
@@ -252,6 +306,8 @@ export async function buildReviewPackageData(
       "AI Review Gateway v0 only accepts same-repository pull requests.",
     );
   }
+
+  const reviewMode = reviewModeFor(pr);
 
   // Resolve every mutable control ref before reading any trusted Organization file.
   // PR base/head are already immutable commit SHAs from the GitHub PR object.
@@ -295,6 +351,7 @@ export async function buildReviewPackageData(
     packageVersion: REVIEW_PACKAGE_VERSION,
     runtimeVersion: AI_REVIEW_RUNTIME_VERSION,
     generatedAt: new Date().toISOString(),
+    reviewMode,
     trust: {
       headIsUntrusted: true,
       executesPullRequestCode: false,
@@ -323,6 +380,10 @@ export async function buildReviewPackageData(
         outputContractBlobSha: outputContract.blobSha,
         profileBlobSha: profile?.blobSha ?? null,
         rootContractBlobSha: rootContract?.blobSha ?? null,
+        taskContract: {
+          state: "unavailable",
+          reason: "trusted_lookup_not_configured",
+        },
       },
     },
     diff: {
@@ -334,12 +395,8 @@ export async function buildReviewPackageData(
       limitChars: MAX_REVIEW_DIFF_CHARS,
     },
     gaps: [
-      ...(profile
-        ? []
-        : [`Missing ${PROFILE_PATH} at base SHA; repository-specific review rules are not yet migrated.`]),
-      ...(diffTruncated
-        ? [`PR diff exceeded ${MAX_REVIEW_DIFF_CHARS} characters and was truncated by Review Gateway v0.`]
-        : []),
+      ...(profile ? [] : [missingProfileGap()]),
+      ...(diffTruncated ? [truncatedDiffGap()] : []),
     ],
   };
 }
