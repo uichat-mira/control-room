@@ -35,6 +35,7 @@ interface ChatCompletionsResponse {
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 300_000;
+const MAX_PROVIDER_RESPONSE_BYTES = 512_000;
 
 function requireNonEmpty(value: string, label: string) {
   const trimmed = value.trim();
@@ -52,6 +53,9 @@ function normalizeEndpoint(value: string) {
   }
   if (url.protocol !== "https:") {
     throw new Error("Provider endpoint must use HTTPS.");
+  }
+  if (url.username || url.password) {
+    throw new Error("Provider endpoint must not contain embedded credentials.");
   }
   return url.toString();
 }
@@ -85,6 +89,43 @@ function usageFromResponse(value: ChatCompletionsResponse["usage"]): ReviewProvi
     ...(outputTokens !== undefined ? { outputTokens } : {}),
     ...(totalTokens !== undefined ? { totalTokens } : {}),
   };
+}
+
+async function readBoundedResponseText(response: Response) {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_PROVIDER_RESPONSE_BYTES) {
+    throw new ReviewProviderError(
+      "Provider response exceeded the review output limit.",
+      "malformed_response",
+    );
+  }
+
+  if (!response.body) return "";
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let text = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_PROVIDER_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new ReviewProviderError(
+          "Provider response exceeded the review output limit.",
+          "malformed_response",
+        );
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return text;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 function parseProviderJson(content: string) {
@@ -154,8 +195,9 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
 
       let payload: ChatCompletionsResponse;
       try {
-        payload = (await response.json()) as ChatCompletionsResponse;
-      } catch {
+        payload = JSON.parse(await readBoundedResponseText(response)) as ChatCompletionsResponse;
+      } catch (error) {
+        if (error instanceof ReviewProviderError) throw error;
         throw new ReviewProviderError(
           "Provider returned a non-JSON Chat Completions response.",
           "malformed_response",
