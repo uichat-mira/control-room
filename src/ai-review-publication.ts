@@ -47,7 +47,7 @@ function safeInline(value: string) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/@/g, "@\u200b")
-    .replace(/([\\`*_[\]{}()#+!|])/g, "\\$1");
+    .replace(/([\\`*_[\]{}()#+|])/g, "\\$1");
 }
 
 function safeIdentity(value: string | null) {
