@@ -141,12 +141,48 @@ function overviewSvgResponse(svg: string, status: string, method: string) {
   });
 }
 
+function overviewCacheKey(request: Request) {
+  const url = new URL(request.url);
+  return new Request(`${url.origin}/embed/__github-overview-cache.svg`, { method: "GET" });
+}
+
+async function readOverviewCache(request: Request): Promise<Response | null> {
+  try {
+    const workerCaches = caches as CacheStorage & { default: Cache };
+    return await workerCaches.default.match(overviewCacheKey(request));
+  } catch {
+    return null;
+  }
+}
+
+async function writeOverviewCache(request: Request, response: Response) {
+  try {
+    const workerCaches = caches as CacheStorage & { default: Cache };
+    await workerCaches.default.put(overviewCacheKey(request), response.clone());
+  } catch {
+    // Cache is an optimization. The embed must remain available without it.
+  }
+}
+
+function headOnly(response: Response) {
+  return new Response(null, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 async function handleGitHubOverviewRequest(request: Request, env: Env): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response("Method Not Allowed", {
       status: 405,
       headers: { allow: "GET, HEAD" },
     });
+  }
+
+  const cached = await readOverviewCache(request);
+  if (cached) {
+    return request.method === "HEAD" ? headOnly(cached) : cached;
   }
 
   try {
@@ -166,17 +202,21 @@ async function handleGitHubOverviewRequest(request: Request, env: Env): Promise<
     const snapshot = (await summaryResponse.json()) as OrganizationSnapshot & {
       apiVersion?: string;
     };
-    return overviewSvgResponse(
+    const response = overviewSvgResponse(
       renderGitHubOverviewSvg(snapshot),
       snapshot.status,
-      request.method,
+      "GET",
     );
+    await writeOverviewCache(request, response);
+    return request.method === "HEAD" ? headOnly(response) : response;
   } catch {
-    return overviewSvgResponse(
+    const response = overviewSvgResponse(
       renderGitHubOverviewUnavailableSvg(),
       "unavailable",
-      request.method,
+      "GET",
     );
+    await writeOverviewCache(request, response);
+    return request.method === "HEAD" ? headOnly(response) : response;
   }
 }
 
@@ -194,7 +234,8 @@ export default {
 
     if (embedRoute) {
       // GitHub may proxy this image through shared infrastructure, so keep the embed
-      // public, cacheable, and outside the per-client API rate-limit bucket.
+      // public and outside the per-client API rate-limit bucket. A short edge cache
+      // prevents repeated organization/service probes from direct image requests.
       return handleGitHubOverviewRequest(request, env);
     }
 
