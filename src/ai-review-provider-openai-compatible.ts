@@ -92,8 +92,13 @@ function usageFromResponse(value: ChatCompletionsResponse["usage"]): ReviewProvi
 }
 
 async function readBoundedResponseText(response: Response) {
-  const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_PROVIDER_RESPONSE_BYTES) {
+  const contentLength = response.headers.get("content-length");
+  const declaredLength = contentLength === null ? undefined : Number(contentLength);
+  if (
+    declaredLength !== undefined &&
+    Number.isFinite(declaredLength) &&
+    declaredLength > MAX_PROVIDER_RESPONSE_BYTES
+  ) {
     throw new ReviewProviderError(
       "Provider response exceeded the review output limit.",
       "malformed_response",
@@ -113,7 +118,11 @@ async function readBoundedResponseText(response: Response) {
       if (done) break;
       totalBytes += value.byteLength;
       if (totalBytes > MAX_PROVIDER_RESPONSE_BYTES) {
-        await reader.cancel();
+        try {
+          await reader.cancel();
+        } catch {
+          // The bounded-output failure remains authoritative even if cancellation fails.
+        }
         throw new ReviewProviderError(
           "Provider response exceeded the review output limit.",
           "malformed_response",
@@ -123,6 +132,15 @@ async function readBoundedResponseText(response: Response) {
     }
     text += decoder.decode();
     return text;
+  } catch (error) {
+    if (error instanceof ReviewProviderError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ReviewProviderError("Provider response stream timed out.", "timeout");
+    }
+    throw new ReviewProviderError(
+      "Provider response stream failed.",
+      "provider_unavailable",
+    );
   } finally {
     reader.releaseLock();
   }
