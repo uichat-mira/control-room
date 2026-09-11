@@ -90,7 +90,7 @@ test("rejects unauthenticated review execution before any GitHub or provider req
   assert.equal(fetchCalled, false);
 });
 
-test("returns explicit REVIEW_UNAVAILABLE after building the trusted package when no provider is configured", async (t) => {
+test("returns explicit REVIEW_UNAVAILABLE after building the trusted package when no provider account is configured", async (t) => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = mockPackageGitHub();
   t.after(() => {
@@ -118,10 +118,14 @@ test("returns explicit REVIEW_UNAVAILABLE after building the trusted package whe
   assert.equal(body.identity.repository, "uichat-mira/example");
   assert.equal(body.identity.baseSha, BASE_SHA);
   assert.equal(body.identity.headSha, HEAD_SHA);
-  assert.deepEqual(body.providerSlots, {
-    primary: "unconfigured",
-    fallback: "unconfigured",
+  assert.deepEqual(body.providerRoute.routine, {
+    state: "unconfigured",
+    provider: "minimax-cn-codeplan",
+    model: "m3",
+    driver: "openai-chat",
   });
+  assert.equal(body.providerRoute.fallback.state, "unconfigured");
+  assert.equal(body.providerRoute.escalation.state, "unconfigured");
   assert.deepEqual(body.execution, {
     state: "REVIEW_UNAVAILABLE",
     reason: "no_eligible_provider",
@@ -129,16 +133,13 @@ test("returns explicit REVIEW_UNAVAILABLE after building the trusted package whe
   });
 });
 
-test("health exposes only provider slot states, never provider credentials", async () => {
+test("health exposes modeled route identities and states, never provider credentials or endpoints", async () => {
   const response = await handleAiReviewRequest(
     new Request("https://control.example/api/v1/ai-review/health"),
     {
       GITHUB_READ_TOKEN: "github-token",
       AI_REVIEW_GATEWAY_TOKEN: "caller-token",
-      AI_REVIEW_PRIMARY_ID: "provider-name",
-      AI_REVIEW_PRIMARY_ENDPOINT: "https://provider.example/v1/chat/completions",
-      AI_REVIEW_PRIMARY_API_KEY: "provider-secret-key",
-      AI_REVIEW_PRIMARY_MODEL: "model-name",
+      AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "provider-secret-key",
     },
   );
   const text = await response.text();
@@ -147,11 +148,14 @@ test("health exposes only provider slot states, never provider credentials", asy
   assert.equal(response.status, 200);
   assert.equal(body.mode, "review-execution-unpublished");
   assert.equal(body.executionVersion, "mira-ai-review-execution/v0");
-  assert.deepEqual(body.providerSlots, {
-    primary: "configured",
-    fallback: "unconfigured",
+  assert.deepEqual(body.providerRoutes.CODE_REVIEW.routine, {
+    state: "configured",
+    provider: "minimax-cn-codeplan",
+    model: "m3",
+    driver: "openai-chat",
   });
+  assert.equal(body.providerRoutes.CODE_REVIEW.fallback.state, "unconfigured");
+  assert.equal(body.providerRoutes.CODE_REVIEW.escalation.state, "unconfigured");
   assert.equal(text.includes("provider-secret-key"), false);
-  assert.equal(text.includes("https://provider.example"), false);
-}
-);
+  assert.equal(text.includes("https://api.minimaxi.com"), false);
+});

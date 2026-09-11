@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "providers": {
+    "minimax-cn-codeplan": {
+      "vendor": "minimax",
+      "plan": "token-plan",
+      "region": "cn",
+      "credential": {
+        "type": "bearer",
+        "secretRef": "AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY"
+      },
+      "transports": {
+        "openai-chat": {
+          "driver": "openai-chat",
+          "endpoint": "https://api.minimaxi.com/v1/chat/completions"
+        }
+      },
+      "models": {
+        "m3": {
+          "modelId": "MiniMax-M3",
+          "transport": "openai-chat",
+          "capabilities": {
+            "reasoning": "inline",
+            "responseFormat": "none"
+          },
+          "reviewDefaults": {
+            "maxPromptCharacters": 250000,
+            "maxOutputTokens": 4096,
+            "outputTokenParameter": "max_completion_tokens"
+          }
+        }
+      }
+    },
+    "volcengine-coding-plan": {
+      "vendor": "volcengine",
+      "plan": "coding-plan",
+      "region": "cn-beijing",
+      "credential": {
+        "type": "bearer",
+        "secretRef": "AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY"
+      },
+      "transports": {
+        "openai-chat": {
+          "driver": "openai-chat",
+          "endpoint": "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"
+        },
+        "anthropic-messages": {
+          "driver": "anthropic-messages",
+          "endpoint": "https://ark.cn-beijing.volces.com/api/coding/v1/messages"
+        }
+      },
+      "models": {}
+    },
+    "opencode-go": {
+      "vendor": "opencode",
+      "plan": "go",
+      "region": "global",
+      "credential": {
+        "type": "bearer",
+        "secretRef": "AI_PROVIDER_OPENCODE_GO_KEY"
+      },
+      "transports": {
+        "openai-chat": {
+          "driver": "openai-chat",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions"
+        },
+        "openai-responses": {
+          "driver": "openai-responses",
+          "endpoint": "https://opencode.ai/zen/go/v1/responses"
+        },
+        "anthropic-messages": {
+          "driver": "anthropic-messages",
+          "endpoint": "https://opencode.ai/zen/go/v1/messages"
+        }
+      },
+      "models": {
+        "deepseek-v4-flash": {
+          "modelId": "deepseek-v4-flash",
+          "transport": "openai-chat",
+          "capabilities": {
+            "reasoning": "provider-default",
+            "responseFormat": "none"
+          },
+          "reviewDefaults": {
+            "maxPromptCharacters": 250000,
+            "maxOutputTokens": 4096,
+            "outputTokenParameter": "max_tokens"
+          }
+        },
+        "deepseek-v4-pro": {
+          "modelId": "deepseek-v4-pro",
+          "transport": "openai-chat",
+          "capabilities": {
+            "reasoning": "provider-default",
+            "responseFormat": "none"
+          },
+          "reviewDefaults": {
+            "maxPromptCharacters": 400000,
+            "maxOutputTokens": 6144,
+            "outputTokenParameter": "max_tokens"
+          }
+        },
+        "glm-5.3": {
+          "modelId": "glm-5.3",
+          "transport": "openai-chat",
+          "capabilities": {
+            "reasoning": "provider-default",
+            "responseFormat": "none"
+          },
+          "reviewDefaults": {
+            "maxPromptCharacters": 250000,
+            "maxOutputTokens": 4096,
+            "outputTokenParameter": "max_tokens"
+          }
+        },
+        "minimax-m3": {
+          "modelId": "minimax-m3",
+          "transport": "anthropic-messages",
+          "capabilities": {
+            "reasoning": "provider-default",
+            "responseFormat": "none"
+          }
+        }
+      }
+    }
+  }
+}

@@ -21,20 +21,21 @@ repository PR + base-side repository controls
 Control Room / AI Review Gateway
   ├─ rebuild trusted package
   ├─ bind exact base/head/control identities
-  ├─ select configured provider slot
-  ├─ call provider adapter
+  ├─ resolve ReviewMode -> Review Route
+  ├─ resolve Provider Account -> Model -> Transport
+  ├─ call the transport driver
   ├─ normalize Mira review result
   ├─ compare freshness / render deterministic output
   └─ GitHub publication                (not enabled yet)
 ```
 
-A provider is an execution backend. It does not own Mira's policy, verdict vocabulary, trust boundary, or publication semantics.
+A provider account is an execution source. It does not own Mira's policy, verdict vocabulary, trust boundary, review routing, or publication semantics.
 
 ## Endpoints
 
 ### `GET /api/v1/ai-review/health`
 
-Public-safe capability status. It exposes caller/provider slot state but never credential values.
+Public-safe capability status. It exposes caller state and mode-specific provider route state, but never credentials, endpoints, or secret values.
 
 ### `POST /api/v1/ai-review/package`
 
@@ -42,7 +43,7 @@ Private trusted-package inspection endpoint.
 
 ### `POST /api/v1/ai-review/review`
 
-Private unpublished execution endpoint. It rebuilds the same trusted package, executes configured Primary/Fallback providers, normalizes the result, and returns execution metadata. It does not write to GitHub.
+Private unpublished execution endpoint. It rebuilds the trusted package, resolves the route for the package's ReviewMode, executes Routine and technical Fallback when eligible, normalizes the result, and returns execution metadata. It does not write to GitHub.
 
 Private callers send:
 
@@ -51,16 +52,7 @@ Authorization: Bearer <AI_REVIEW_GATEWAY_TOKEN>
 Content-Type: application/json
 ```
 
-Request body:
-
-```json
-{
-  "repository": "uichat-mira/mira-mobile",
-  "pullRequest": 123
-}
-```
-
-The caller cannot supply authoritative head/base SHA, diff, policy text, repository controls, provider, model, endpoint, or provider credential.
+The caller cannot supply authoritative head/base SHA, diff, policy text, repository controls, provider, model, endpoint, route, or provider credential.
 
 ## Caller credential boundary
 
@@ -70,7 +62,8 @@ Production uses:
 
 - `AI_REVIEW_GATEWAY_TOKEN` — authenticates trusted calls to private AI Review routes;
 - `GITHUB_READ_TOKEN` — lets Control Room reconstruct trusted package data from GitHub;
-- future GitHub publication credential — not implemented yet and must remain Worker-only and separate from both values above.
+- provider-account secrets — authenticate Control Room to model suppliers;
+- future GitHub publication credential — not implemented yet and must remain Worker-only and separate from all values above.
 
 Repository callers that receive the Gateway bearer must remain thin trusted callers. They must not checkout PR head code, execute PR-controlled scripts/packages/configuration, expose the token to model input, or write it to logs/artifacts.
 
@@ -104,107 +97,147 @@ test -> prod    RELEASE_REVIEW
 
 Unsupported transitions are rejected rather than guessed.
 
-## Provider slots
+## Provider configuration model
 
-V1 exposes two runtime slots:
+Provider configuration is intentionally not modeled as `PRIMARY_*` / `FALLBACK_*` environment variables.
+
+The trusted model is:
 
 ```text
-Primary
+Provider Account
+  └─ Transport
+      └─ Model
+
+ReviewMode
+  └─ Review Route
+      ├─ Routine
+      ├─ Fallback
+      └─ Escalation
+```
+
+The source of truth is version controlled:
+
+```text
+config/ai-review/providers.json
+config/ai-review/routing.json
+```
+
+### Provider Account
+
+A Provider Account represents one supplier account or subscription, not one model.
+
+V1 models these accounts:
+
+```text
+minimax-cn-codeplan
+volcengine-coding-plan
+opencode-go
+```
+
+Each account declares:
+
+- vendor / plan / region metadata;
+- one credential `secretRef`;
+- one or more protocol transports;
+- models available through that account.
+
+Provider credentials never appear in JSON. The JSON contains only a secret reference such as:
+
+```text
+AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY
+```
+
+### Transport
+
+Transport is a protocol surface, not a vendor name.
+
+The schema recognizes:
+
+```text
+openai-chat
+openai-responses
+anthropic-messages
+```
+
+V1 execution currently implements `openai-chat`. Other transports can be modeled without URL heuristics, but a routed target on an unsupported transport must fail closed instead of silently changing protocol.
+
+This is important because one supplier account can expose multiple protocols, and one aggregator can expose different models through different protocols.
+
+### Model
+
+A model belongs to a Provider Account and selects one declared transport.
+
+Model configuration owns model-level capabilities and conservative review defaults, for example:
+
+- reasoning behavior;
+- response-format capability;
+- maximum review prompt characters;
+- provider-side output token budget;
+- the concrete output-token parameter supported by that model/transport.
+
+These values are reviewed as code. They are not copied into GitHub Actions Variables.
+
+### Review Route
+
+Routing is separate from Provider configuration.
+
+For each ReviewMode, the route may contain:
+
+```text
+Routine
 Fallback
+Escalation
 ```
 
-`reserve` and `judge` remain architectural extension points and are not current V1 delivery requirements.
+`Routine` is the normal reviewer.
 
-A slot is one configured provider instance. The generic OpenAI-compatible adapter is a protocol implementation, not a vendor decision.
+`Fallback` is technical continuity after a Routine provider failure and must use a different Provider Account from Routine. Changing models inside the same supplier account is not considered provider redundancy.
 
-Slot health states are:
+`Escalation` is a quality/risk upgrade path, not a technical fallback. It is modeled in V1 but is not automatically executed by the current runtime. A later policy slice must define deterministic escalation triggers before it is enabled.
+
+Current routing intent is:
 
 ```text
-unconfigured
-configured
-partial
-invalid
+CODE_REVIEW
+  Routine     minimax-cn-codeplan / m3
+  Fallback    opencode-go / deepseek-v4-flash
+  Escalation  opencode-go / deepseek-v4-pro
+
+PROMOTION_REVIEW
+  Routine     minimax-cn-codeplan / m3
+  Fallback    opencode-go / deepseek-v4-flash
+  Escalation  opencode-go / deepseek-v4-pro
+
+RELEASE_REVIEW
+  Routine     opencode-go / deepseek-v4-pro
+  Fallback    minimax-cn-codeplan / m3
+  Escalation  opencode-go / glm-5.3
 ```
 
-Production deployment accepts only `unconfigured` or `configured`. A partial or invalid provider slot fails deployment before Worker mutation, and post-deploy smoke rejects either state if it somehow reaches production.
+This is routing configuration, not Organization Review Policy. Policy still defines what constitutes a valid Mira review.
 
 ## Provider deployment configuration
 
-GitHub Actions is the trusted configuration source for provider slots:
+GitHub Actions only provides provider-account credentials. Non-secret provider metadata does not live in repository settings.
 
-- provider API keys are GitHub Actions **Secrets** and become encrypted Worker secrets;
-- provider metadata/capability settings are GitHub Actions **Variables** and become ordinary Worker vars through `wrangler deploy --var`;
-- provider values are never supplied by the PR request being reviewed.
-
-This split is intentional. Wrangler treats ordinary vars as deployment-owned configuration, while encrypted secrets have a separate lifecycle and are not removed merely because a later deploy omits them.
-
-### Primary
-
-Secret:
+Managed provider secrets are:
 
 ```text
-AI_REVIEW_PRIMARY_API_KEY
+AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY
+AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY
+AI_PROVIDER_OPENCODE_GO_KEY
 ```
 
-Variables:
+The deploy workflow:
 
-```text
-AI_REVIEW_PRIMARY_ID
-AI_REVIEW_PRIMARY_ENDPOINT
-AI_REVIEW_PRIMARY_MODEL
-AI_REVIEW_PRIMARY_RESPONSE_FORMAT
-AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS
-AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS
-AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER
-```
+1. loads and validates the version-controlled provider catalog and routing;
+2. rejects routed states that are invalid or use an unsupported transport when credentialed;
+3. reconciles managed Worker secrets against GitHub Actions Secrets;
+4. injects only non-empty provider account credentials as encrypted Worker secrets;
+5. deploys no model/endpoint/budget Actions Variables;
+6. verifies post-deploy route state through public-safe health.
 
-### Fallback
-
-Secret:
-
-```text
-AI_REVIEW_FALLBACK_API_KEY
-```
-
-Variables:
-
-```text
-AI_REVIEW_FALLBACK_ID
-AI_REVIEW_FALLBACK_ENDPOINT
-AI_REVIEW_FALLBACK_MODEL
-AI_REVIEW_FALLBACK_RESPONSE_FORMAT
-AI_REVIEW_FALLBACK_MAX_PROMPT_CHARACTERS
-AI_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS
-AI_REVIEW_FALLBACK_OUTPUT_TOKEN_PARAMETER
-```
-
-Required fields for a configured slot are `ID`, `ENDPOINT`, `API_KEY`, and `MODEL`.
-
-`RESPONSE_FORMAT` accepts `json_object` or `none` and defaults to `json_object` when omitted.
-
-`MAX_PROMPT_CHARACTERS` is an optional conservative pre-request capacity guard. It is not a tokenizer or a claim about the provider's exact token context window.
-
-`MAX_OUTPUT_TOKENS` and `OUTPUT_TOKEN_PARAMETER` are optional but must be configured together. `OUTPUT_TOKEN_PARAMETER` accepts:
-
-```text
-max_tokens
-max_completion_tokens
-```
-
-The output budget is sent to the provider before generation. The existing Worker response-size bound remains a separate transport safety limit.
-
-### Disabling or changing a slot
-
-A slot must be changed as one complete configuration. Supplying only some required fields is `partial` and blocks deployment.
-
-To disable a slot, clear all of that slot's GitHub Variables and its API-key Secret. On the next production deployment:
-
-1. the deploy workflow validates the desired GitHub-side slot as `unconfigured`;
-2. if an old managed provider API-key secret still exists on the Worker, the workflow explicitly deletes that secret with Wrangler's bulk-secret deletion path;
-3. the normal Worker deploy omits the provider's plain vars, so Wrangler removes the old ordinary vars as part of its source-of-truth deployment behavior;
-4. post-deploy health must report only `unconfigured` or `configured`, never `partial` or `invalid`.
-
-This explicit reconciliation prevents a previously configured provider key from surviving as a hidden or "ghost" provider after the GitHub configuration has been cleared.
+Wrangler does not delete an encrypted secret merely because it is omitted from a later deployment. The workflow therefore explicitly removes stale managed provider-account secrets when their desired GitHub Secret is absent. This prevents a disabled account from surviving as a hidden or ghost credential.
 
 ## Provider failure semantics
 
@@ -221,20 +254,21 @@ malformed_response
 unknown
 ```
 
-A failed Primary may fall through to an eligible Fallback. When no provider is configured, or all eligible providers fail, execution returns `REVIEW_UNAVAILABLE`; it never manufactures `NO_BLOCKING_FINDINGS`.
+A failed Routine provider may fall through to its configured cross-account Fallback. When no executable Routine/Fallback provider is configured, or all eligible providers fail, execution returns `REVIEW_UNAVAILABLE`; it never manufactures `NO_BLOCKING_FINDINGS`.
+
+Escalation is not part of this technical fallback loop.
 
 ## Current production state
 
-At the time of this document update:
+Until a provider-account key is deliberately provisioned, production remains:
 
 ```text
-mode      review-execution-unpublished
-caller    configured
-Primary   unconfigured
-Fallback  unconfigured
+mode        review-execution-unpublished
+caller      configured
+CODE_REVIEW Routine/Fallback unconfigured
 ```
 
-No provider/model has been selected by Organization policy. Historical Mobile provider/model configuration is not automatically the Organization choice.
+The catalog and routing may already name intended providers while runtime remains unconfigured because credentials are intentionally absent.
 
 ## Publication boundary
 

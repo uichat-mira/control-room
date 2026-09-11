@@ -108,7 +108,26 @@ function completedEnvelope(
         reason: "trusted_lookup_not_configured",
       },
     },
-    providerSlots: { primary: "configured", fallback: "unconfigured" },
+    providerRoute: {
+      routine: {
+        state: "configured",
+        provider: "minimax-cn-codeplan",
+        model: "m3",
+        driver: "openai-chat",
+      },
+      fallback: {
+        state: "unconfigured",
+        provider: "opencode-go",
+        model: "deepseek-v4-flash",
+        driver: "openai-chat",
+      },
+      escalation: {
+        state: "unconfigured",
+        provider: "opencode-go",
+        model: "deepseek-v4-pro",
+        driver: "openai-chat",
+      },
+    },
     execution: {
       state: "COMPLETED",
       review: {
@@ -117,15 +136,15 @@ function completedEnvelope(
         validationGaps: [],
       },
       provider: {
-        id: "primary-test",
-        model: "review-model",
-        role: "primary",
+        id: "minimax-cn-codeplan/m3",
+        model: "MiniMax-M3",
+        role: "routine",
       },
       attempts: [
         {
-          provider: "primary-test",
-          model: "review-model",
-          role: "primary",
+          provider: "minimax-cn-codeplan/m3",
+          model: "MiniMax-M3",
+          role: "routine",
           status: "success",
           latencyMs: 123,
         },
@@ -149,8 +168,8 @@ test("renders the Organization marker exactly once with every required logical s
   assert.match(body, /CODE_REVIEW/);
   assert.match(body, /Trusted Task \/ PR contract/);
   assert.match(body, /trusted_lookup_not_configured/);
-  assert.match(body, /primary-test/);
-  assert.match(body, /review-model/);
+  assert.match(body, /minimax-cn-codeplan\/m3/);
+  assert.match(body, /MiniMax-M3/);
   assert.match(body, /mira-ai-review-output\/v1/);
   assert.match(body, /control-room-ai-review\/v0/);
   assert.match(body, /mira-ai-review-execution\/v0/);
@@ -355,10 +374,7 @@ test("runtime preserves deterministic gaps and promotes an invalid clean verdict
 
   const result = await executeTrustedReviewPackage(
     {
-      AI_REVIEW_PRIMARY_ID: "primary-test",
-      AI_REVIEW_PRIMARY_ENDPOINT: "https://provider.example/v1/chat/completions",
-      AI_REVIEW_PRIMARY_API_KEY: "provider-secret",
-      AI_REVIEW_PRIMARY_MODEL: "review-model",
+      AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "provider-secret",
     },
     reviewPackage(),
   );
@@ -371,5 +387,7 @@ test("runtime preserves deterministic gaps and promotes an invalid clean verdict
     state: "unavailable",
     reason: "trusted_lookup_not_configured",
   });
+  assert.equal(result.providerRoute.routine.provider, "minimax-cn-codeplan");
+  assert.equal(result.providerRoute.routine.state, "configured");
   assert.match(result.executedAt, /^\d{4}-\d{2}-\d{2}T/);
 });

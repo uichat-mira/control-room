@@ -38,7 +38,7 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const health = JSON.parse(fs.readFileSync('/tmp/ai-review-health.json', 'utf8'));
-          const deployableSlotStates = new Set(['unconfigured', 'configured']);
+          const deployableStates = new Set(['unconfigured', 'configured']);
 
           if (health.ok !== true) throw new Error('AI Review Gateway health is not ok');
           if (health.service !== 'mira-ai-review-gateway') {
@@ -63,16 +63,26 @@ jobs:
             throw new Error(`Purpose-specific AI Review caller auth is not configured: ${health.callerAuth}`);
           }
           if (!health.policyRef) throw new Error('Organization policy ref is missing');
-          if (!health.providerSlots || !deployableSlotStates.has(health.providerSlots.primary) || !deployableSlotStates.has(health.providerSlots.fallback)) {
-            throw new Error(`Non-deployable provider slot state reached production: ${JSON.stringify(health.providerSlots)}`);
+          for (const mode of ['CODE_REVIEW', 'PROMOTION_REVIEW', 'RELEASE_REVIEW']) {
+            const route = health.providerRoutes?.[mode];
+            if (!route?.routine) throw new Error(`Missing provider route for ${mode}`);
+            for (const [role, target] of Object.entries(route)) {
+              if (!deployableStates.has(target.state)) {
+                throw new Error(`Non-deployable provider route reached production: ${mode}.${role}=${target.state}`);
+              }
+              if (!target.provider || !target.model || !target.driver) {
+                throw new Error(`Incomplete provider route metadata: ${mode}.${role}`);
+              }
+            }
           }
 
+          const code = health.providerRoutes.CODE_REVIEW;
           console.log(
-            `AI Review Gateway smoke OK: runtime=${health.runtimeVersion}, package=${health.packageVersion}, execution=${health.executionVersion}, mode=${health.mode}, github=${health.github}, callerAuth=${health.callerAuth}, primary=${health.providerSlots.primary}, fallback=${health.providerSlots.fallback}, policyRef=${health.policyRef}`,
+            `AI Review Gateway smoke OK: runtime=${health.runtimeVersion}, mode=${health.mode}, callerAuth=${health.callerAuth}, CODE_REVIEW routine=${code.routine.provider}/${code.routine.model}:${code.routine.state}, fallback=${code.fallback?.provider}/${code.fallback?.model}:${code.fallback?.state}, escalation=${code.escalation?.provider}/${code.escalation?.model}:${code.escalation?.state}`,
           );
           NODE
 
-      - name: Verify explicit unavailable semantics when providers are unconfigured
+      - name: Verify explicit unavailable semantics when CODE_REVIEW providers are unconfigured
         shell: bash
         run: |
           set -euo pipefail
@@ -85,13 +95,14 @@ jobs:
           if ! node <<'NODE'
           const fs = require('node:fs');
           const health = JSON.parse(fs.readFileSync('/tmp/ai-review-health.json', 'utf8'));
+          const route = health.providerRoutes?.CODE_REVIEW;
           process.exit(
-            health.providerSlots?.primary === 'unconfigured' &&
-            health.providerSlots?.fallback === 'unconfigured' ? 0 : 1
+            route?.routine?.state === 'unconfigured' &&
+            (!route?.fallback || route.fallback.state === 'unconfigured') ? 0 : 1
           );
           NODE
           then
-            echo 'At least one provider slot is configured; skipping no-provider execution smoke to avoid a paid model call.'
+            echo 'At least one executable CODE_REVIEW provider is configured; skipping no-provider execution smoke to avoid a paid model call.'
             exit 0
           fi
 
@@ -129,7 +140,10 @@ jobs:
           if (!Array.isArray(result.execution?.attempts) || result.execution.attempts.length !== 0) {
             throw new Error('No-provider execution must not contain provider attempts');
           }
+          if (result.providerRoute?.routine?.state !== 'unconfigured') {
+            throw new Error(`Expected unconfigured routine route, got ${result.providerRoute?.routine?.state}`);
+          }
           console.log(
-            `AI Review no-provider smoke OK: repo=${result.identity.repository}#${result.identity.pullRequest}, head=${result.identity.headSha}, state=${result.execution.state}, reason=${result.execution.reason}`,
+            `AI Review no-provider smoke OK: repo=${result.identity.repository}#${result.identity.pullRequest}, head=${result.identity.headSha}, routine=${result.providerRoute.routine.provider}/${result.providerRoute.routine.model}, state=${result.execution.state}`,
           );
           NODE

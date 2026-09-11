@@ -77,18 +77,12 @@ function pkg(gaps: ReviewPackageGap[] = [
   };
 }
 
-const primaryEnv = {
-  AI_REVIEW_PRIMARY_ID: "primary-test",
-  AI_REVIEW_PRIMARY_ENDPOINT: "https://primary.example/v1/chat/completions",
-  AI_REVIEW_PRIMARY_API_KEY: "primary-secret",
-  AI_REVIEW_PRIMARY_MODEL: "primary-model",
+const routineEnv = {
+  AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "minimax-secret",
 };
 
 const fallbackEnv = {
-  AI_REVIEW_FALLBACK_ID: "fallback-test",
-  AI_REVIEW_FALLBACK_ENDPOINT: "https://fallback.example/v1/chat/completions",
-  AI_REVIEW_FALLBACK_API_KEY: "fallback-secret",
-  AI_REVIEW_FALLBACK_MODEL: "fallback-model",
+  AI_PROVIDER_OPENCODE_GO_KEY: "opencode-go-secret",
 };
 
 function providerResponse(review: unknown) {
@@ -105,49 +99,59 @@ function humanCheckResponse() {
   });
 }
 
-test("reports provider slots without exposing configuration values", () => {
-  assert.deepEqual(buildReviewProviderRegistry({}), {
-    providers: [],
-    slots: { primary: "unconfigured", fallback: "unconfigured" },
-  });
+test("reports modeled CODE_REVIEW routes without exposing provider configuration values", () => {
+  const registry = buildReviewProviderRegistry({}, "CODE_REVIEW");
 
-  const partial = buildReviewProviderRegistry({ AI_REVIEW_PRIMARY_MODEL: "model-only" });
-  assert.equal(partial.providers.length, 0);
-  assert.deepEqual(partial.slots, { primary: "partial", fallback: "unconfigured" });
-
-  const invalid = buildReviewProviderRegistry({
-    ...primaryEnv,
-    AI_REVIEW_PRIMARY_ENDPOINT: "http://primary.example/v1/chat/completions",
+  assert.equal(registry.providers.length, 0);
+  assert.deepEqual(registry.route.routine, {
+    state: "unconfigured",
+    provider: "minimax-cn-codeplan",
+    model: "m3",
+    driver: "openai-chat",
   });
-  assert.equal(invalid.providers.length, 0);
-  assert.deepEqual(invalid.slots, { primary: "invalid", fallback: "unconfigured" });
+  assert.deepEqual(registry.route.fallback, {
+    state: "unconfigured",
+    provider: "opencode-go",
+    model: "deepseek-v4-flash",
+    driver: "openai-chat",
+  });
+  assert.deepEqual(registry.route.escalation, {
+    state: "unconfigured",
+    provider: "opencode-go",
+    model: "deepseek-v4-pro",
+    driver: "openai-chat",
+  });
 });
 
-test("keeps configured providers in primary then fallback order", () => {
-  const registry = buildReviewProviderRegistry({ ...primaryEnv, ...fallbackEnv });
-  assert.deepEqual(registry.slots, { primary: "configured", fallback: "configured" });
+test("keeps executable providers in routine then technical-fallback order while escalation stays out of the queue", () => {
+  const registry = buildReviewProviderRegistry(
+    { ...routineEnv, ...fallbackEnv },
+    "CODE_REVIEW",
+  );
+
+  assert.equal(registry.route.routine.state, "configured");
+  assert.equal(registry.route.fallback?.state, "configured");
+  assert.equal(registry.route.escalation?.state, "configured");
   assert.equal(registry.providers.length, 2);
-  assert.equal(registry.providers[0].id, "primary-test");
-  assert.equal(registry.providers[0].role, "primary");
-  assert.equal(registry.providers[1].id, "fallback-test");
+  assert.equal(registry.providers[0].id, "minimax-cn-codeplan/m3");
+  assert.equal(registry.providers[0].role, "routine");
+  assert.equal(registry.providers[1].id, "opencode-go/deepseek-v4-flash");
   assert.equal(registry.providers[1].role, "fallback");
+  assert.equal(registry.providers.some((provider) => provider.role === "escalation"), false);
 });
 
-test("returns REVIEW_UNAVAILABLE when production has no provider configured", async () => {
+test("returns REVIEW_UNAVAILABLE when no provider account credential is configured", async () => {
   const result = await executeTrustedReviewPackage({}, pkg());
 
   assert.equal(result.executionVersion, "mira-ai-review-execution/v0");
-  assert.deepEqual(result.providerSlots, {
-    primary: "unconfigured",
-    fallback: "unconfigured",
-  });
+  assert.equal(result.providerRoute.routine.state, "unconfigured");
+  assert.equal(result.providerRoute.fallback?.state, "unconfigured");
+  assert.equal(result.providerRoute.escalation?.state, "unconfigured");
   assert.equal(result.identity.reviewMode, "CODE_REVIEW");
   assert.deepEqual(result.identity.taskContract, {
     state: "unavailable",
     reason: "trusted_lookup_not_configured",
   });
-  assert.equal(result.identity.baseSha, "1111111111111111111111111111111111111111");
-  assert.equal(result.identity.headSha, "2222222222222222222222222222222222222222");
   assert.deepEqual(result.execution, {
     state: "REVIEW_UNAVAILABLE",
     reason: "no_eligible_provider",
@@ -155,31 +159,32 @@ test("returns REVIEW_UNAVAILABLE when production has no provider configured", as
   });
 });
 
-test("executes a configured primary provider and returns only normalized review metadata", async (t) => {
+test("executes the configured routine provider and returns normalized review metadata", async (t) => {
   const originalFetch = globalThis.fetch;
   let providerRequestBody = "";
+  let authorization = "";
 
   globalThis.fetch = async (_input, init) => {
     providerRequestBody = String(init?.body ?? "");
+    authorization = new Headers(init?.headers).get("authorization") ?? "";
     return humanCheckResponse();
   };
   t.after(() => {
     globalThis.fetch = originalFetch;
   });
 
-  const result = await executeTrustedReviewPackage(primaryEnv, pkg());
+  const result = await executeTrustedReviewPackage(routineEnv, pkg());
 
   assert.equal(result.execution.state, "COMPLETED");
-  assert.equal(result.execution.provider.id, "primary-test");
-  assert.equal(result.execution.provider.model, "primary-model");
-  assert.equal(result.execution.provider.role, "primary");
+  if (result.execution.state !== "COMPLETED") return;
+  assert.equal(result.execution.provider.id, "minimax-cn-codeplan/m3");
+  assert.equal(result.execution.provider.model, "MiniMax-M3");
+  assert.equal(result.execution.provider.role, "routine");
   assert.equal(result.execution.review.verdict, "HUMAN_CHECK_NEEDED");
-  assert.deepEqual(result.execution.review.validationGaps, [
-    "Missing repository-specific review profile.",
-  ]);
   assert.equal(result.execution.attempts.length, 1);
   assert.equal(result.execution.attempts[0].status, "success");
-  assert.equal(providerRequestBody.includes("primary-secret"), false);
+  assert.equal(providerRequestBody.includes("minimax-secret"), false);
+  assert.equal(authorization, "Bearer minimax-secret");
 });
 
 test("promotes a clean provider verdict when a deterministic gap is material", async (t) => {
@@ -193,7 +198,7 @@ test("promotes a clean provider verdict when a deterministic gap is material", a
     globalThis.fetch = originalFetch;
   });
 
-  const result = await executeTrustedReviewPackage(primaryEnv, pkg());
+  const result = await executeTrustedReviewPackage(routineEnv, pkg());
   assert.equal(result.execution.state, "COMPLETED");
   assert.equal(result.execution.review.verdict, "HUMAN_CHECK_NEEDED");
   assert.deepEqual(result.execution.review.validationGaps, [
@@ -212,7 +217,7 @@ test("keeps a clean verdict when deterministic gaps are explicitly non-material"
     globalThis.fetch = originalFetch;
   });
 
-  const result = await executeTrustedReviewPackage(primaryEnv, pkg([
+  const result = await executeTrustedReviewPackage(routineEnv, pkg([
     { code: "missing_repository_profile", message: "Informational migration note.", material: false },
   ]));
   assert.equal(result.execution.state, "COMPLETED");
@@ -240,7 +245,7 @@ test("does not downgrade CHANGES_NEEDED when a deterministic gap is material", a
     globalThis.fetch = originalFetch;
   });
 
-  const result = await executeTrustedReviewPackage(primaryEnv, pkg());
+  const result = await executeTrustedReviewPackage(routineEnv, pkg());
   assert.equal(result.execution.state, "COMPLETED");
   assert.equal(result.execution.review.verdict, "CHANGES_NEEDED");
   assert.equal(result.execution.review.findings.length, 1);
@@ -263,12 +268,12 @@ test("does not downgrade CONTRACT_CONFLICT when a deterministic gap is material"
     globalThis.fetch = originalFetch;
   });
 
-  const result = await executeTrustedReviewPackage(primaryEnv, pkg());
+  const result = await executeTrustedReviewPackage(routineEnv, pkg());
   assert.equal(result.execution.state, "COMPLETED");
   assert.equal(result.execution.review.verdict, "CONTRACT_CONFLICT");
 });
 
-test("falls back after a technical primary failure without exposing either key", async (t) => {
+test("falls back across provider accounts after a technical routine failure without exposing either key", async (t) => {
   const originalFetch = globalThis.fetch;
   const requested: string[] = [];
   const bodies: string[] = [];
@@ -277,8 +282,8 @@ test("falls back after a technical primary failure without exposing either key",
     const url = typeof input === "string" ? input : input.url;
     requested.push(url);
     bodies.push(String(init?.body ?? ""));
-    if (url.startsWith("https://primary.example/")) {
-      return new Response("primary internal detail", { status: 503 });
+    if (url.startsWith("https://api.minimaxi.com/")) {
+      return new Response("routine internal detail", { status: 503 });
     }
     return humanCheckResponse();
   };
@@ -287,17 +292,18 @@ test("falls back after a technical primary failure without exposing either key",
   });
 
   const result = await executeTrustedReviewPackage(
-    { ...primaryEnv, ...fallbackEnv },
+    { ...routineEnv, ...fallbackEnv },
     pkg(),
   );
 
   assert.equal(result.execution.state, "COMPLETED");
-  assert.equal(result.execution.provider.id, "fallback-test");
+  if (result.execution.state !== "COMPLETED") return;
+  assert.equal(result.execution.provider.id, "opencode-go/deepseek-v4-flash");
   assert.equal(result.execution.provider.role, "fallback");
   assert.equal(result.execution.attempts.length, 2);
   assert.equal(result.execution.attempts[0].failureClass, "provider_unavailable");
   assert.equal(result.execution.attempts[1].status, "success");
   assert.equal(requested.length, 2);
-  assert.equal(bodies.some((body) => body.includes("primary-secret")), false);
-  assert.equal(bodies.some((body) => body.includes("fallback-secret")), false);
+  assert.equal(bodies.some((body) => body.includes("minimax-secret")), false);
+  assert.equal(bodies.some((body) => body.includes("opencode-go-secret")), false);
 });

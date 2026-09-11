@@ -100,7 +100,7 @@ function provider(
 ) {
   return new OpenAICompatibleReviewProvider({
     id: "budget-test",
-    role: "primary",
+    role: "routine",
     endpoint: "https://provider.example/v1/chat/completions",
     apiKey: "provider-secret-key",
     model: "review-model",

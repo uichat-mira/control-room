@@ -93,13 +93,13 @@ test("maps provider HTTP failures into stable technical classes", () => {
   assert.equal(failureClassForHttpStatus(400), "unknown");
 });
 
-test("returns the first normalized provider result", async () => {
+test("returns the first normalized routine result", async () => {
   let fallbackCalled = false;
   const providers: ReviewProvider<{ task: string }>[] = [
     {
-      id: "primary-example",
+      id: "routine-example",
       model: "model-a",
-      role: "primary",
+      role: "routine",
       async review() {
         return { output: cleanReview, usage: { totalTokens: 123 } };
       },
@@ -118,7 +118,9 @@ test("returns the first normalized provider result", async () => {
   const result = await executeReviewWithFallback({ task: "review" }, providers);
 
   assert.equal(result.state, "COMPLETED");
-  assert.equal(result.provider.id, "primary-example");
+  if (result.state !== "COMPLETED") return;
+  assert.equal(result.provider.id, "routine-example");
+  assert.equal(result.provider.role, "routine");
   assert.equal(result.attempts.length, 1);
   assert.equal(result.attempts[0].usage?.totalTokens, 123);
   assert.equal(fallbackCalled, false);
@@ -127,9 +129,9 @@ test("returns the first normalized provider result", async () => {
 test("falls back only after a provider execution failure", async () => {
   const providers: ReviewProvider<null>[] = [
     {
-      id: "primary-example",
+      id: "routine-example",
       model: "model-a",
-      role: "primary",
+      role: "routine",
       async review() {
         throw new ReviewProviderError("rate limited", "rate_limit");
       },
@@ -153,6 +155,7 @@ test("falls back only after a provider execution failure", async () => {
   const result = await executeReviewWithFallback(null, providers);
 
   assert.equal(result.state, "COMPLETED");
+  if (result.state !== "COMPLETED") return;
   assert.equal(result.provider.id, "fallback-example");
   assert.equal(result.attempts.length, 2);
   assert.equal(result.attempts[0].failureClass, "rate_limit");
@@ -162,9 +165,9 @@ test("falls back only after a provider execution failure", async () => {
 test("treats malformed provider output as a technical failure eligible for fallback", async () => {
   const providers: ReviewProvider<null>[] = [
     {
-      id: "primary-example",
+      id: "routine-example",
       model: "model-a",
-      role: "primary",
+      role: "routine",
       async review() {
         return { output: { verdict: "PASS" } };
       },
@@ -182,6 +185,7 @@ test("treats malformed provider output as a technical failure eligible for fallb
   const result = await executeReviewWithFallback(null, providers);
 
   assert.equal(result.state, "COMPLETED");
+  if (result.state !== "COMPLETED") return;
   assert.equal(result.attempts[0].failureClass, "malformed_response");
   assert.equal(result.provider.id, "fallback-example");
 });
@@ -189,9 +193,9 @@ test("treats malformed provider output as a technical failure eligible for fallb
 test("returns REVIEW_UNAVAILABLE instead of a false clean verdict when every provider fails", async () => {
   const providers: ReviewProvider<null>[] = [
     {
-      id: "primary-example",
+      id: "routine-example",
       model: "model-a",
-      role: "primary",
+      role: "routine",
       async review() {
         throw new ReviewProviderError("provider down", "provider_unavailable");
       },

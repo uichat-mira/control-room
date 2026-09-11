@@ -9,7 +9,7 @@ export const MIRA_REVIEW_SEVERITIES = ["P0", "P1", "P2"] as const;
 
 export type MiraReviewVerdict = (typeof MIRA_REVIEW_VERDICTS)[number];
 export type MiraReviewSeverity = (typeof MIRA_REVIEW_SEVERITIES)[number];
-export type ReviewProviderRole = "primary" | "fallback" | "reserve" | "judge";
+export type ReviewProviderRole = "routine" | "fallback" | "escalation";
 export type ReviewFailureClass =
   | "rate_limit"
   | "quota"
@@ -178,70 +178,72 @@ function normalizeContractConflict(value: unknown): ContractConflictDetail {
 
 export function normalizeProviderReview(value: unknown): NormalizedReview {
   const raw = asRecord(value, "review");
-  const verdict = nonEmptyString(raw.verdict, "verdict");
-
+  const verdict = nonEmptyString(raw.verdict, "review.verdict");
   if (!MIRA_REVIEW_VERDICTS.includes(verdict as MiraReviewVerdict)) {
     throw new ReviewNormalizationError(
-      `verdict must be one of ${MIRA_REVIEW_VERDICTS.join(", ")}.`,
+      `review.verdict must be one of ${MIRA_REVIEW_VERDICTS.join(", ")}.`,
     );
   }
 
   if (!Array.isArray(raw.findings)) {
-    throw new ReviewNormalizationError("findings must be an array.");
+    throw new ReviewNormalizationError("review.findings must be an array.");
   }
-
   const findings = raw.findings.map(normalizeFinding);
-  const validationGaps = stringArray(raw.validationGaps, "validationGaps");
+  const validationGaps = stringArray(raw.validationGaps, "review.validationGaps");
   const normalizedVerdict = verdict as MiraReviewVerdict;
 
   if (normalizedVerdict === "CHANGES_NEEDED" && findings.length === 0) {
     throw new ReviewNormalizationError("CHANGES_NEEDED requires at least one P0-P2 finding.");
   }
-
-  if (normalizedVerdict !== "CHANGES_NEEDED" && findings.length > 0) {
-    throw new ReviewNormalizationError(
-      `${normalizedVerdict} cannot contain blocking P0-P2 findings; use CHANGES_NEEDED.`,
-    );
-  }
-
   if (normalizedVerdict === "HUMAN_CHECK_NEEDED" && validationGaps.length === 0) {
     throw new ReviewNormalizationError(
       "HUMAN_CHECK_NEEDED requires at least one material validation gap.",
     );
   }
 
-  const contractConflict =
-    normalizedVerdict === "CONTRACT_CONFLICT"
-      ? normalizeContractConflict(raw.contractConflict)
-      : undefined;
+  if (normalizedVerdict === "CONTRACT_CONFLICT") {
+    if (raw.contractConflict === undefined) {
+      throw new ReviewNormalizationError("CONTRACT_CONFLICT requires contractConflict detail.");
+    }
+    return {
+      verdict: normalizedVerdict,
+      findings,
+      validationGaps,
+      contractConflict: normalizeContractConflict(raw.contractConflict),
+    };
+  }
+
+  if (raw.contractConflict !== undefined) {
+    throw new ReviewNormalizationError(
+      "contractConflict detail is only valid for CONTRACT_CONFLICT.",
+    );
+  }
 
   return {
     verdict: normalizedVerdict,
     findings,
     validationGaps,
-    ...(contractConflict ? { contractConflict } : {}),
   };
 }
 
 export function failureClassForHttpStatus(status: number): ReviewFailureClass {
   if (status === 401 || status === 403) return "provider_auth";
   if (status === 402) return "quota";
-  if (status === 408 || status === 504) return "timeout";
   if (status === 429) return "rate_limit";
-  if (status >= 500 && status <= 599) return "provider_unavailable";
+  if (status === 408 || status === 504) return "timeout";
+  if (status >= 500) return "provider_unavailable";
   return "unknown";
 }
 
-function classifyFailure(error: unknown): ReviewFailureClass {
+function technicalFailure(error: unknown): ReviewFailureClass {
   if (error instanceof ReviewProviderError) return error.failureClass;
   if (error instanceof ReviewNormalizationError) return "malformed_response";
-  if (error instanceof DOMException && error.name === "AbortError") return "timeout";
   return "unknown";
 }
 
 export async function executeReviewWithFallback<Input>(
   input: Input,
-  providers: readonly ReviewProvider<Input>[],
+  providers: ReviewProvider<Input>[],
 ): Promise<ReviewExecutionResult> {
   if (providers.length === 0) {
     return {
@@ -255,20 +257,17 @@ export async function executeReviewWithFallback<Input>(
 
   for (const provider of providers) {
     const startedAt = Date.now();
-
     try {
       const response = await provider.review(input);
       const review = normalizeProviderReview(response.output);
-      const attempt: ProviderAttempt = {
+      attempts.push({
         provider: provider.id,
         model: provider.model,
         role: provider.role,
         status: "success",
         latencyMs: Date.now() - startedAt,
         ...(response.usage ? { usage: response.usage } : {}),
-      };
-      attempts.push(attempt);
-
+      });
       return {
         state: "COMPLETED",
         review,
@@ -286,7 +285,7 @@ export async function executeReviewWithFallback<Input>(
         role: provider.role,
         status: "failed",
         latencyMs: Date.now() - startedAt,
-        failureClass: classifyFailure(error),
+        failureClass: technicalFailure(error),
       });
     }
   }

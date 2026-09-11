@@ -11,7 +11,7 @@ import {
   executeTrustedReviewPackage,
 } from "./ai-review-execution.ts";
 import {
-  buildReviewProviderRegistry,
+  buildReviewRoutingHealth,
   type AiReviewProviderEnv,
 } from "./ai-review-provider-registry.ts";
 
@@ -63,7 +63,7 @@ async function authorized(request: Request, env: AiReviewEnv) {
 }
 
 function health(env: AiReviewEnv) {
-  const providerSlots = buildReviewProviderRegistry(env).slots;
+  const providerRoutes = buildReviewRoutingHealth(env);
   return {
     ok: true,
     service: "mira-ai-review-gateway",
@@ -74,7 +74,7 @@ function health(env: AiReviewEnv) {
     github: env.GITHUB_READ_TOKEN ? "configured" : "unconfigured",
     callerAuth: env.AI_REVIEW_GATEWAY_TOKEN ? "configured" : "unconfigured",
     policyRef: env.AI_REVIEW_POLICY_REF?.trim() || "main",
-    providerSlots,
+    providerRoutes,
   };
 }
 
