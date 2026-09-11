@@ -1,4 +1,8 @@
-import type { ReviewPackage } from "./ai-review-package.ts";
+import type {
+  ReviewMode,
+  ReviewPackage,
+  TrustedTaskContractIdentity,
+} from "./ai-review-package.ts";
 import {
   buildReviewProviderRegistry,
   type AiReviewProviderEnv,
@@ -17,6 +21,7 @@ export interface ReviewExecutionEnvelope {
   identity: {
     repository: string;
     pullRequest: number;
+    reviewMode: ReviewMode;
     baseSha: string;
     headSha: string;
     policyCommitSha: string;
@@ -24,6 +29,7 @@ export interface ReviewExecutionEnvelope {
     outputContractBlobSha: string;
     profileBlobSha: string | null;
     rootContractBlobSha: string | null;
+    taskContract: TrustedTaskContractIdentity;
   };
   providerSlots: {
     primary: ReviewProviderSlotState;
@@ -36,6 +42,7 @@ export function reviewPackageIdentity(pkg: ReviewPackage): ReviewExecutionEnvelo
   return {
     repository: pkg.pullRequest.repository,
     pullRequest: pkg.pullRequest.number,
+    reviewMode: pkg.reviewMode,
     baseSha: pkg.pullRequest.base.sha,
     headSha: pkg.pullRequest.head.sha,
     policyCommitSha: pkg.controls.identity.policyCommitSha,
@@ -43,6 +50,7 @@ export function reviewPackageIdentity(pkg: ReviewPackage): ReviewExecutionEnvelo
     outputContractBlobSha: pkg.controls.identity.outputContractBlobSha,
     profileBlobSha: pkg.controls.identity.profileBlobSha,
     rootContractBlobSha: pkg.controls.identity.rootContractBlobSha,
+    taskContract: pkg.controls.identity.taskContract,
   };
 }
 
@@ -52,11 +60,22 @@ function withDeterministicGaps(
 ): ReviewExecutionResult {
   if (execution.state !== "COMPLETED" || pkg.gaps.length === 0) return execution;
 
+  const deterministicMessages = pkg.gaps.map((gap) => gap.message);
+  const hasMaterialGap = pkg.gaps.some((gap) => gap.material);
+  const currentVerdict = execution.review.verdict;
+  const reconciledVerdict =
+    hasMaterialGap && currentVerdict === "NO_BLOCKING_FINDINGS"
+      ? "HUMAN_CHECK_NEEDED"
+      : currentVerdict;
+
   return {
     ...execution,
     review: {
       ...execution.review,
-      validationGaps: [...new Set([...pkg.gaps, ...execution.review.validationGaps])],
+      verdict: reconciledVerdict,
+      validationGaps: [
+        ...new Set([...deterministicMessages, ...execution.review.validationGaps]),
+      ],
     },
   };
 }
