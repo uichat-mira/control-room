@@ -13,6 +13,7 @@ export const REVIEW_EXECUTION_VERSION = "mira-ai-review-execution/v0" as const;
 
 export interface ReviewExecutionEnvelope {
   executionVersion: typeof REVIEW_EXECUTION_VERSION;
+  executedAt: string;
   identity: {
     repository: string;
     pullRequest: number;
@@ -45,15 +46,32 @@ export function reviewPackageIdentity(pkg: ReviewPackage): ReviewExecutionEnvelo
   };
 }
 
+function withDeterministicGaps(
+  execution: ReviewExecutionResult,
+  pkg: ReviewPackage,
+): ReviewExecutionResult {
+  if (execution.state !== "COMPLETED" || pkg.gaps.length === 0) return execution;
+
+  return {
+    ...execution,
+    review: {
+      ...execution.review,
+      validationGaps: [...new Set([...pkg.gaps, ...execution.review.validationGaps])],
+    },
+  };
+}
+
 export async function executeTrustedReviewPackage(
   env: AiReviewProviderEnv,
   pkg: ReviewPackage,
 ): Promise<ReviewExecutionEnvelope> {
   const registry = buildReviewProviderRegistry(env);
-  const execution = await executeReviewWithFallback(pkg, registry.providers);
+  const rawExecution = await executeReviewWithFallback(pkg, registry.providers);
+  const execution = withDeterministicGaps(rawExecution, pkg);
 
   return {
     executionVersion: REVIEW_EXECUTION_VERSION,
+    executedAt: new Date().toISOString(),
     identity: reviewPackageIdentity(pkg),
     providerSlots: registry.slots,
     execution,
