@@ -83,9 +83,11 @@ jobs:
             if (!condition) throw new Error(message);
           };
           const sha40 = (value) => typeof value === 'string' && /^[0-9a-f]{40}$/i.test(value);
+          const reviewModes = new Set(['CODE_REVIEW', 'PROMOTION_REVIEW', 'RELEASE_REVIEW']);
 
           assert(pkg.packageVersion === 'mira-ai-review-package/v0', `Unexpected packageVersion: ${pkg.packageVersion}`);
           assert(pkg.runtimeVersion === 'control-room-ai-review/v0', `Unexpected runtimeVersion: ${pkg.runtimeVersion}`);
+          assert(reviewModes.has(pkg.reviewMode), `Unexpected reviewMode: ${pkg.reviewMode}`);
           assert(pkg.trust?.headIsUntrusted === true, 'Package must mark PR head as untrusted');
           assert(pkg.trust?.executesPullRequestCode === false, 'Package must not execute PR code');
           assert(pkg.pullRequest?.repository === repository, `Unexpected repository: ${pkg.pullRequest?.repository}`);
@@ -94,21 +96,37 @@ jobs:
           const baseSha = pkg.pullRequest?.base?.sha;
           const headSha = pkg.pullRequest?.head?.sha;
           const identity = pkg.controls?.identity;
+          const taskContract = identity?.taskContract;
 
           assert(sha40(baseSha), `Invalid base SHA: ${baseSha}`);
           assert(sha40(headSha), `Invalid head SHA: ${headSha}`);
           assert(sha40(identity?.policyCommitSha), 'Missing immutable Organization policy commit SHA');
           assert(sha40(identity?.policyBlobSha), 'Missing Organization policy blob SHA');
           assert(sha40(identity?.outputContractBlobSha), 'Missing output-contract blob SHA');
+          assert(taskContract && ['unavailable', 'resolved'].includes(taskContract.state), 'Trusted Task / PR contract identity must have an explicit state');
+          if (taskContract.state === 'unavailable') {
+            assert(typeof taskContract.reason === 'string' && taskContract.reason.length > 0, 'Unavailable task-contract identity must include a reason');
+          } else {
+            assert(typeof taskContract.repository === 'string' && taskContract.repository.length > 0, 'Resolved task contract must include repository');
+            assert(Number.isInteger(taskContract.issue) && taskContract.issue > 0, 'Resolved task contract must include issue number');
+            assert(typeof taskContract.contentSha256 === 'string' && /^[0-9a-f]{64}$/i.test(taskContract.contentSha256), 'Resolved task contract must include SHA-256 content identity');
+          }
           assert(pkg.trust?.repositoryControlsSource === `${repository}@${baseSha}`, 'Repository controls are not bound to the PR base SHA');
           assert(pkg.trust?.organizationControlsSource === `uichat-mira/.github@${identity.policyCommitSha}`, 'Organization controls are not bound to one immutable commit');
           assert(pkg.diff?.source === `${baseSha}...${headSha}`, 'Diff identity does not match exact base/head SHAs');
           assert(typeof pkg.diff?.content === 'string', 'Package diff content is missing');
           assert(Array.isArray(pkg.gaps), 'Package gaps must be an array');
+          for (const [index, gap] of pkg.gaps.entries()) {
+            assert(gap && typeof gap === 'object', `Gap ${index} must be an object`);
+            assert(typeof gap.code === 'string' && gap.code.length > 0, `Gap ${index} must include a code`);
+            assert(typeof gap.message === 'string' && gap.message.length > 0, `Gap ${index} must include a message`);
+            assert(typeof gap.material === 'boolean', `Gap ${index} must include material boolean`);
+          }
 
           const summary = {
             repository,
             pullRequest,
+            reviewMode: pkg.reviewMode,
             baseSha,
             headSha,
             policyCommitSha: identity.policyCommitSha,
@@ -116,6 +134,7 @@ jobs:
             outputContractBlobSha: identity.outputContractBlobSha,
             profileBlobSha: identity.profileBlobSha ?? null,
             rootContractBlobSha: identity.rootContractBlobSha ?? null,
+            taskContract,
             diff: {
               chars: pkg.diff.chars,
               originalChars: pkg.diff.originalChars,
