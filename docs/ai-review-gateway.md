@@ -36,10 +36,10 @@ Public-safe capability status. It exposes configuration state, never credential 
 
 ### `POST /api/v1/ai-review/package`
 
-Private endpoint. Requires:
+Private endpoint. Organization repository callers use the shared Organization GitHub token:
 
 ```text
-Authorization: Bearer <AI_REVIEW_GATEWAY_TOKEN>
+Authorization: Bearer <ORG_GITHUB_TOKEN>
 Content-Type: application/json
 ```
 
@@ -54,7 +54,26 @@ Request body:
 
 The caller is intentionally not allowed to supply head SHA, base SHA, diff, policy text, or repository review controls as authoritative input.
 
-The Gateway re-fetches those facts from GitHub using its own read credential.
+The Gateway re-fetches those facts from GitHub using the same Organization credential.
+
+## Shared-token boundary
+
+`ORG_GITHUB_TOKEN` is intentionally reused for both:
+
+- repository caller authentication to the AI Review Gateway;
+- Control Room authenticated reads from GitHub.
+
+Control Room deploys that Organization secret as `GITHUB_READ_TOKEN`. The outer Gateway maps the same runtime value into the AI Review Gateway caller-auth slot, so there is no second Review Gateway secret to provision or rotate.
+
+Because this token has GitHub authority, any repository workflow that receives it must remain a thin trusted caller. While `ORG_GITHUB_TOKEN` is present, the caller must not:
+
+- checkout the PR head;
+- execute PR-controlled scripts, packages, Actions, configuration, or generated commands;
+- pass the token to model/provider input;
+- echo the token or include it in artifacts/logs;
+- expose it to a job whose behavior can be changed by the PR being reviewed.
+
+The intended caller gathers only trusted GitHub event metadata and calls Control Room. Review content is reconstructed by Control Room itself.
 
 ## Trust model
 
@@ -82,15 +101,12 @@ Worker runtime bindings:
 
 ```text
 GITHUB_READ_TOKEN
-AI_REVIEW_GATEWAY_TOKEN
 AI_REVIEW_POLICY_REF   optional, default: main
 ```
 
-`GITHUB_READ_TOKEN` already exists in Control Room's current deployment path through the Organization GitHub read token.
+The current Control Room deployment maps the Organization Actions secret `ORG_GITHUB_TOKEN` to `GITHUB_READ_TOKEN`.
 
-`AI_REVIEW_GATEWAY_TOKEN` is a separate caller credential. A GitHub credential must not be reused as the bearer token sent to the Gateway.
-
-The current Wrangler deployment preserves Worker secrets that are not present in its deployment secrets file, so the caller token may be provisioned directly as a Worker secret without being copied into repository source.
+No separate `AI_REVIEW_GATEWAY_TOKEN` is required. The Gateway intentionally reuses the same runtime credential for caller authentication.
 
 ## Review package identity
 
