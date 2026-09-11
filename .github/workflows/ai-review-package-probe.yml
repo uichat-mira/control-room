@@ -17,6 +17,8 @@ on:
     branches:
       - prod
     paths:
+      - 'src/ai-review.ts'
+      - 'src/ai-review-package.ts'
       - '.github/workflows/ai-review-package-probe.yml'
 
 permissions:
