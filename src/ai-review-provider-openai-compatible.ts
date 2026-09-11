@@ -9,6 +9,10 @@ import {
   type ReviewProviderUsage,
 } from "./ai-review-runtime.ts";
 
+export type OpenAICompatibleOutputTokenParameter =
+  | "max_tokens"
+  | "max_completion_tokens";
+
 export interface OpenAICompatibleReviewProviderConfig {
   id: string;
   role: ReviewProviderRole;
@@ -17,6 +21,13 @@ export interface OpenAICompatibleReviewProviderConfig {
   model: string;
   timeoutMs?: number;
   responseFormat?: "json_object" | "none";
+  inputBudget?: {
+    maxPromptCharacters: number;
+  };
+  outputBudget?: {
+    parameter: OpenAICompatibleOutputTokenParameter;
+    tokens: number;
+  };
 }
 
 interface ChatCompletionsResponse {
@@ -68,6 +79,40 @@ function normalizeTimeout(value: number | undefined) {
     );
   }
   return timeout;
+}
+
+function positiveInteger(value: number, label: string) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${label} must be a positive safe integer.`);
+  }
+  return value;
+}
+
+function normalizeInputBudget(
+  value: OpenAICompatibleReviewProviderConfig["inputBudget"],
+) {
+  if (!value) return undefined;
+  return {
+    maxPromptCharacters: positiveInteger(
+      value.maxPromptCharacters,
+      "Provider max prompt characters",
+    ),
+  };
+}
+
+function normalizeOutputBudget(
+  value: OpenAICompatibleReviewProviderConfig["outputBudget"],
+) {
+  if (!value) return undefined;
+  if (value.parameter !== "max_tokens" && value.parameter !== "max_completion_tokens") {
+    throw new Error(
+      "Provider output token parameter must be max_tokens or max_completion_tokens.",
+    );
+  }
+  return {
+    parameter: value.parameter,
+    tokens: positiveInteger(value.tokens, "Provider max output tokens"),
+  };
 }
 
 function tokenCount(value: unknown) {
@@ -163,6 +208,10 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
   readonly #apiKey: string;
   readonly #timeoutMs: number;
   readonly #responseFormat: "json_object" | "none";
+  readonly #inputBudget: { maxPromptCharacters: number } | undefined;
+  readonly #outputBudget:
+    | { parameter: OpenAICompatibleOutputTokenParameter; tokens: number }
+    | undefined;
 
   constructor(config: OpenAICompatibleReviewProviderConfig) {
     this.id = requireNonEmpty(config.id, "Provider id");
@@ -172,10 +221,27 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
     this.model = requireNonEmpty(config.model, "Provider model");
     this.#timeoutMs = normalizeTimeout(config.timeoutMs);
     this.#responseFormat = config.responseFormat ?? "json_object";
+    this.#inputBudget = normalizeInputBudget(config.inputBudget);
+    this.#outputBudget = normalizeOutputBudget(config.outputBudget);
   }
 
   async review(input: ReviewPackage): Promise<ReviewProviderResponse> {
     const prompt = buildReviewPrompt(input);
+    const promptCharacters = prompt.messages.reduce(
+      (total, message) => total + message.content.length,
+      0,
+    );
+
+    if (
+      this.#inputBudget &&
+      promptCharacters > this.#inputBudget.maxPromptCharacters
+    ) {
+      throw new ReviewProviderError(
+        `Review prompt exceeds configured provider input capacity (${promptCharacters} > ${this.#inputBudget.maxPromptCharacters} characters).`,
+        "input_limit",
+      );
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#timeoutMs);
 
@@ -193,6 +259,9 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
             messages: prompt.messages,
             ...(this.#responseFormat === "json_object"
               ? { response_format: { type: "json_object" } }
+              : {}),
+            ...(this.#outputBudget
+              ? { [this.#outputBudget.parameter]: this.#outputBudget.tokens }
               : {}),
           }),
           signal: controller.signal,
