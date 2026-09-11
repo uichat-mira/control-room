@@ -1,15 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ReviewPackage } from "../src/ai-review-package.ts";
+import type { ReviewPackage, ReviewPackageGap } from "../src/ai-review-package.ts";
 import { executeTrustedReviewPackage } from "../src/ai-review-execution.ts";
 import { buildReviewProviderRegistry } from "../src/ai-review-provider-registry.ts";
 
-function pkg(): ReviewPackage {
+function pkg(gaps: ReviewPackageGap[] = [
+  {
+    code: "missing_repository_profile",
+    message: "Missing repository-specific review profile.",
+    material: true,
+  },
+]): ReviewPackage {
   return {
     packageVersion: "mira-ai-review-package/v0",
     runtimeVersion: "control-room-ai-review/v0",
     generatedAt: "2026-09-11T00:00:00.000Z",
+    reviewMode: "CODE_REVIEW",
     trust: {
       headIsUntrusted: true,
       executesPullRequestCode: false,
@@ -52,6 +59,10 @@ function pkg(): ReviewPackage {
         outputContractBlobSha: "5555555555555555555555555555555555555555",
         profileBlobSha: null,
         rootContractBlobSha: null,
+        taskContract: {
+          state: "unavailable",
+          reason: "trusted_lookup_not_configured",
+        },
       },
     },
     diff: {
@@ -62,7 +73,7 @@ function pkg(): ReviewPackage {
       truncated: false,
       limitChars: 180000,
     },
-    gaps: ["Missing repository-specific review profile."],
+    gaps,
   };
 }
 
@@ -80,19 +91,17 @@ const fallbackEnv = {
   AI_REVIEW_FALLBACK_MODEL: "fallback-model",
 };
 
-function cleanResponse() {
+function providerResponse(review: unknown) {
   return Response.json({
-    choices: [
-      {
-        message: {
-          content: JSON.stringify({
-            verdict: "HUMAN_CHECK_NEEDED",
-            findings: [],
-            validationGaps: ["Missing repository-specific review profile."],
-          }),
-        },
-      },
-    ],
+    choices: [{ message: { content: JSON.stringify(review) } }],
+  });
+}
+
+function humanCheckResponse() {
+  return providerResponse({
+    verdict: "HUMAN_CHECK_NEEDED",
+    findings: [],
+    validationGaps: ["Missing repository-specific review profile."],
   });
 }
 
@@ -132,6 +141,11 @@ test("returns REVIEW_UNAVAILABLE when production has no provider configured", as
     primary: "unconfigured",
     fallback: "unconfigured",
   });
+  assert.equal(result.identity.reviewMode, "CODE_REVIEW");
+  assert.deepEqual(result.identity.taskContract, {
+    state: "unavailable",
+    reason: "trusted_lookup_not_configured",
+  });
   assert.equal(result.identity.baseSha, "1111111111111111111111111111111111111111");
   assert.equal(result.identity.headSha, "2222222222222222222222222222222222222222");
   assert.deepEqual(result.execution, {
@@ -147,7 +161,7 @@ test("executes a configured primary provider and returns only normalized review 
 
   globalThis.fetch = async (_input, init) => {
     providerRequestBody = String(init?.body ?? "");
-    return cleanResponse();
+    return humanCheckResponse();
   };
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -160,9 +174,98 @@ test("executes a configured primary provider and returns only normalized review 
   assert.equal(result.execution.provider.model, "primary-model");
   assert.equal(result.execution.provider.role, "primary");
   assert.equal(result.execution.review.verdict, "HUMAN_CHECK_NEEDED");
+  assert.deepEqual(result.execution.review.validationGaps, [
+    "Missing repository-specific review profile.",
+  ]);
   assert.equal(result.execution.attempts.length, 1);
   assert.equal(result.execution.attempts[0].status, "success");
   assert.equal(providerRequestBody.includes("primary-secret"), false);
+});
+
+test("promotes a clean provider verdict when a deterministic gap is material", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => providerResponse({
+    verdict: "NO_BLOCKING_FINDINGS",
+    findings: [],
+    validationGaps: [],
+  });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const result = await executeTrustedReviewPackage(primaryEnv, pkg());
+  assert.equal(result.execution.state, "COMPLETED");
+  assert.equal(result.execution.review.verdict, "HUMAN_CHECK_NEEDED");
+  assert.deepEqual(result.execution.review.validationGaps, [
+    "Missing repository-specific review profile.",
+  ]);
+});
+
+test("keeps a clean verdict when deterministic gaps are explicitly non-material", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => providerResponse({
+    verdict: "NO_BLOCKING_FINDINGS",
+    findings: [],
+    validationGaps: [],
+  });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const result = await executeTrustedReviewPackage(primaryEnv, pkg([
+    { code: "missing_repository_profile", message: "Informational migration note.", material: false },
+  ]));
+  assert.equal(result.execution.state, "COMPLETED");
+  assert.equal(result.execution.review.verdict, "NO_BLOCKING_FINDINGS");
+  assert.deepEqual(result.execution.review.validationGaps, ["Informational migration note."]);
+});
+
+test("does not downgrade CHANGES_NEEDED when a deterministic gap is material", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => providerResponse({
+    verdict: "CHANGES_NEEDED",
+    findings: [{
+      severity: "P1",
+      observation: "Observed break.",
+      inference: "Core flow fails.",
+      judgment: "This is blocking.",
+      impact: "Users cannot continue.",
+      location: "src/a.ts:1",
+      suggestedFix: "Restore the required behavior.",
+      verification: "Run the focused regression test.",
+    }],
+    validationGaps: [],
+  });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const result = await executeTrustedReviewPackage(primaryEnv, pkg());
+  assert.equal(result.execution.state, "COMPLETED");
+  assert.equal(result.execution.review.verdict, "CHANGES_NEEDED");
+  assert.equal(result.execution.review.findings.length, 1);
+});
+
+test("does not downgrade CONTRACT_CONFLICT when a deterministic gap is material", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => providerResponse({
+    verdict: "CONTRACT_CONFLICT",
+    findings: [],
+    validationGaps: [],
+    contractConflict: {
+      sources: ["Task contract", "repository profile"],
+      conflictingRequirements: ["Use A", "Do not use A"],
+      whyItChangesJudgment: "Both requirements cannot be satisfied together.",
+      maintainerDecisionRequired: "Choose the governing requirement.",
+    },
+  });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const result = await executeTrustedReviewPackage(primaryEnv, pkg());
+  assert.equal(result.execution.state, "COMPLETED");
+  assert.equal(result.execution.review.verdict, "CONTRACT_CONFLICT");
 });
 
 test("falls back after a technical primary failure without exposing either key", async (t) => {
@@ -177,7 +280,7 @@ test("falls back after a technical primary failure without exposing either key",
     if (url.startsWith("https://primary.example/")) {
       return new Response("primary internal detail", { status: 503 });
     }
-    return cleanResponse();
+    return humanCheckResponse();
   };
   t.after(() => {
     globalThis.fetch = originalFetch;
