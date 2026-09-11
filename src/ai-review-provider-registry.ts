@@ -1,170 +1,154 @@
-import type { ReviewPackage } from "./ai-review-package.ts";
+import type { ReviewMode, ReviewPackage } from "./ai-review-package.ts";
 import {
-  OpenAICompatibleReviewProvider,
-  type OpenAICompatibleOutputTokenParameter,
-} from "./ai-review-provider-openai-compatible.ts";
-import type { ReviewProvider, ReviewProviderRole } from "./ai-review-runtime.ts";
-
-export type ReviewProviderSlotState = "unconfigured" | "configured" | "partial" | "invalid";
+  PROVIDER_CATALOG,
+  REVIEW_ROUTING,
+  type ProviderModelConfig,
+  type ProviderTransportConfig,
+  type ReviewRouteRole,
+  type ReviewRouteTarget,
+} from "./ai-review-provider-config.ts";
+import { OpenAICompatibleReviewProvider } from "./ai-review-provider-openai-compatible.ts";
+import type { ReviewProvider } from "./ai-review-runtime.ts";
 
 export interface AiReviewProviderEnv {
-  AI_REVIEW_PRIMARY_ID?: string;
-  AI_REVIEW_PRIMARY_ENDPOINT?: string;
-  AI_REVIEW_PRIMARY_API_KEY?: string;
-  AI_REVIEW_PRIMARY_MODEL?: string;
-  AI_REVIEW_PRIMARY_RESPONSE_FORMAT?: string;
-  AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS?: string;
-  AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS?: string;
-  AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER?: string;
-  AI_REVIEW_FALLBACK_ID?: string;
-  AI_REVIEW_FALLBACK_ENDPOINT?: string;
-  AI_REVIEW_FALLBACK_API_KEY?: string;
-  AI_REVIEW_FALLBACK_MODEL?: string;
-  AI_REVIEW_FALLBACK_RESPONSE_FORMAT?: string;
-  AI_REVIEW_FALLBACK_MAX_PROMPT_CHARACTERS?: string;
-  AI_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS?: string;
-  AI_REVIEW_FALLBACK_OUTPUT_TOKEN_PARAMETER?: string;
+  [key: string]: string | undefined;
+  AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY?: string;
+  AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY?: string;
+  AI_PROVIDER_OPENCODE_GO_KEY?: string;
+}
+
+export type ReviewProviderRouteState =
+  | "unconfigured"
+  | "configured"
+  | "unsupported"
+  | "invalid";
+
+export interface ReviewRouteStatus {
+  state: ReviewProviderRouteState;
+  provider: string;
+  model: string;
+  driver: string;
 }
 
 export interface ReviewProviderRegistry {
   providers: ReviewProvider<ReviewPackage>[];
-  slots: {
-    primary: ReviewProviderSlotState;
-    fallback: ReviewProviderSlotState;
+  route: {
+    routine: ReviewRouteStatus;
+    fallback?: ReviewRouteStatus;
+    escalation?: ReviewRouteStatus;
   };
 }
 
-interface SlotValues {
-  id?: string;
-  endpoint?: string;
-  apiKey?: string;
-  model?: string;
-  responseFormat?: string;
-  maxPromptCharacters?: string;
-  maxOutputTokens?: string;
-  outputTokenParameter?: string;
-}
-
-function trimmed(value: string | undefined) {
-  const result = value?.trim();
-  return result || undefined;
-}
-
-function responseFormat(value: string | undefined) {
-  const normalized = trimmed(value) ?? "json_object";
-  if (normalized === "json_object" || normalized === "none") return normalized;
-  return null;
-}
-
-function positiveIntegerSetting(value: string | undefined) {
-  const normalized = trimmed(value);
-  if (!normalized) return undefined;
-  if (!/^\d+$/.test(normalized)) return null;
-  const parsed = Number(normalized);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function outputTokenParameter(value: string | undefined) {
-  const normalized = trimmed(value);
-  if (!normalized) return undefined;
-  if (normalized === "max_tokens" || normalized === "max_completion_tokens") {
-    return normalized as OpenAICompatibleOutputTokenParameter;
+function targetConfig(target: ReviewRouteTarget) {
+  const account = PROVIDER_CATALOG.providers[target.provider];
+  const model = account?.models[target.model];
+  const transport = model ? account?.transports[model.transport] : undefined;
+  if (!account || !model || !transport) {
+    throw new Error(`Invalid trusted provider target ${target.provider}/${target.model}.`);
   }
-  return null;
+  return { account, model, transport };
 }
 
-function slot(
-  values: SlotValues,
-  role: Extract<ReviewProviderRole, "primary" | "fallback">,
-): { state: ReviewProviderSlotState; provider?: ReviewProvider<ReviewPackage> } {
-  const normalized = {
-    id: trimmed(values.id),
-    endpoint: trimmed(values.endpoint),
-    apiKey: trimmed(values.apiKey),
-    model: trimmed(values.model),
-    responseFormat: trimmed(values.responseFormat),
-    maxPromptCharacters: trimmed(values.maxPromptCharacters),
-    maxOutputTokens: trimmed(values.maxOutputTokens),
-    outputTokenParameter: trimmed(values.outputTokenParameter),
+function statusFor(
+  target: ReviewRouteTarget,
+  state: ReviewProviderRouteState,
+  transport: ProviderTransportConfig,
+): ReviewRouteStatus {
+  return {
+    state,
+    provider: target.provider,
+    model: target.model,
+    driver: transport.driver,
   };
-  const anyConfigured = Object.values(normalized).some(Boolean);
-  if (!anyConfigured) return { state: "unconfigured" };
+}
 
-  if (!normalized.id || !normalized.endpoint || !normalized.apiKey || !normalized.model) {
-    return { state: "partial" };
+function openAiProvider(
+  target: ReviewRouteTarget,
+  role: ReviewRouteRole,
+  transport: ProviderTransportConfig,
+  model: ProviderModelConfig,
+  apiKey: string,
+) {
+  return new OpenAICompatibleReviewProvider({
+    id: `${target.provider}/${target.model}`,
+    role,
+    endpoint: transport.endpoint,
+    apiKey,
+    model: model.modelId,
+    responseFormat: model.capabilities?.responseFormat ?? "none",
+    ...(model.reviewDefaults?.maxPromptCharacters !== undefined
+      ? {
+          inputBudget: {
+            maxPromptCharacters: model.reviewDefaults.maxPromptCharacters,
+          },
+        }
+      : {}),
+    ...(model.reviewDefaults?.maxOutputTokens !== undefined &&
+    model.reviewDefaults.outputTokenParameter !== undefined
+      ? {
+          outputBudget: {
+            parameter: model.reviewDefaults.outputTokenParameter,
+            tokens: model.reviewDefaults.maxOutputTokens,
+          },
+        }
+      : {}),
+  });
+}
+
+function instantiateTarget(
+  env: AiReviewProviderEnv,
+  target: ReviewRouteTarget,
+  role: ReviewRouteRole,
+): { status: ReviewRouteStatus; provider?: ReviewProvider<ReviewPackage> } {
+  const { account, model, transport } = targetConfig(target);
+  const apiKey = env[account.credential.secretRef]?.trim();
+  if (!apiKey) {
+    return { status: statusFor(target, "unconfigured", transport) };
   }
 
-  const format = responseFormat(normalized.responseFormat);
-  const maxPromptCharacters = positiveIntegerSetting(normalized.maxPromptCharacters);
-  const maxOutputTokens = positiveIntegerSetting(normalized.maxOutputTokens);
-  const tokenParameter = outputTokenParameter(normalized.outputTokenParameter);
-
-  if (format === null || maxPromptCharacters === null || maxOutputTokens === null || tokenParameter === null) {
-    return { state: "invalid" };
-  }
-
-  if ((maxOutputTokens === undefined) !== (tokenParameter === undefined)) {
-    return { state: "invalid" };
+  if (transport.driver !== "openai-chat") {
+    return { status: statusFor(target, "unsupported", transport) };
   }
 
   try {
     return {
-      state: "configured",
-      provider: new OpenAICompatibleReviewProvider({
-        id: normalized.id,
-        endpoint: normalized.endpoint,
-        apiKey: normalized.apiKey,
-        model: normalized.model,
-        role,
-        responseFormat: format,
-        ...(maxPromptCharacters !== undefined
-          ? { inputBudget: { maxPromptCharacters } }
-          : {}),
-        ...(maxOutputTokens !== undefined && tokenParameter !== undefined
-          ? { outputBudget: { parameter: tokenParameter, tokens: maxOutputTokens } }
-          : {}),
-      }),
+      status: statusFor(target, "configured", transport),
+      provider: openAiProvider(target, role, transport, model, apiKey),
     };
   } catch {
-    return { state: "invalid" };
+    return { status: statusFor(target, "invalid", transport) };
   }
 }
 
-export function buildReviewProviderRegistry(env: AiReviewProviderEnv): ReviewProviderRegistry {
-  const primary = slot(
-    {
-      id: env.AI_REVIEW_PRIMARY_ID,
-      endpoint: env.AI_REVIEW_PRIMARY_ENDPOINT,
-      apiKey: env.AI_REVIEW_PRIMARY_API_KEY,
-      model: env.AI_REVIEW_PRIMARY_MODEL,
-      responseFormat: env.AI_REVIEW_PRIMARY_RESPONSE_FORMAT,
-      maxPromptCharacters: env.AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS,
-      maxOutputTokens: env.AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS,
-      outputTokenParameter: env.AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER,
-    },
-    "primary",
-  );
-  const fallback = slot(
-    {
-      id: env.AI_REVIEW_FALLBACK_ID,
-      endpoint: env.AI_REVIEW_FALLBACK_ENDPOINT,
-      apiKey: env.AI_REVIEW_FALLBACK_API_KEY,
-      model: env.AI_REVIEW_FALLBACK_MODEL,
-      responseFormat: env.AI_REVIEW_FALLBACK_RESPONSE_FORMAT,
-      maxPromptCharacters: env.AI_REVIEW_FALLBACK_MAX_PROMPT_CHARACTERS,
-      maxOutputTokens: env.AI_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS,
-      outputTokenParameter: env.AI_REVIEW_FALLBACK_OUTPUT_TOKEN_PARAMETER,
-    },
-    "fallback",
-  );
+export function buildReviewProviderRegistry(
+  env: AiReviewProviderEnv,
+  mode: ReviewMode,
+): ReviewProviderRegistry {
+  const route = REVIEW_ROUTING.routes[mode];
+  const routine = instantiateTarget(env, route.routine, "routine");
+  const fallback = route.fallback
+    ? instantiateTarget(env, route.fallback, "fallback")
+    : undefined;
+  const escalation = route.escalation
+    ? instantiateTarget(env, route.escalation, "escalation")
+    : undefined;
 
   return {
-    providers: [primary.provider, fallback.provider].filter(
+    providers: [routine.provider, fallback?.provider].filter(
       (provider): provider is ReviewProvider<ReviewPackage> => Boolean(provider),
     ),
-    slots: {
-      primary: primary.state,
-      fallback: fallback.state,
+    route: {
+      routine: routine.status,
+      ...(fallback ? { fallback: fallback.status } : {}),
+      ...(escalation ? { escalation: escalation.status } : {}),
     },
+  };
+}
+
+export function buildReviewRoutingHealth(env: AiReviewProviderEnv) {
+  return {
+    CODE_REVIEW: buildReviewProviderRegistry(env, "CODE_REVIEW").route,
+    PROMOTION_REVIEW: buildReviewProviderRegistry(env, "PROMOTION_REVIEW").route,
+    RELEASE_REVIEW: buildReviewProviderRegistry(env, "RELEASE_REVIEW").route,
   };
 }
