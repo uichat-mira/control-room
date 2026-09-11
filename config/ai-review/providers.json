@@ -20,8 +20,13 @@
           "modelId": "MiniMax-M3",
           "transport": "openai-chat",
           "capabilities": {
-            "reasoning": "inline",
+            "reasoning": "separate",
             "responseFormat": "none"
+          },
+          "driverOptions": {
+            "openaiChat": {
+              "reasoningSplit": true
+            }
           },
           "reviewDefaults": {
             "maxPromptCharacters": 250000,
