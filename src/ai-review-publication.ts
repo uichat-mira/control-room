@@ -2,6 +2,7 @@ import {
   AI_REVIEW_RUNTIME_VERSION,
   REVIEW_PACKAGE_VERSION,
   type ReviewPackage,
+  type TrustedTaskContractIdentity,
 } from "./ai-review-package.ts";
 import {
   REVIEW_EXECUTION_VERSION,
@@ -20,13 +21,14 @@ export const MAX_REVIEW_COMMENT_BYTES = 60_000;
 export type ReviewStaleReason =
   | "repository"
   | "pull_request"
+  | "review_mode"
   | "base_sha"
   | "head_sha"
-  | "policy_commit"
   | "policy_blob"
   | "output_contract_blob"
   | "profile_blob"
-  | "root_contract_blob";
+  | "root_contract_blob"
+  | "task_contract";
 
 export type ReviewFreshness =
   | { state: "CURRENT"; reasons: [] }
@@ -52,6 +54,32 @@ function safeInline(value: string) {
 
 function safeIdentity(value: string | null) {
   return value ? safeInline(value) : "none";
+}
+
+function renderTaskContract(identity: TrustedTaskContractIdentity) {
+  if (identity.state === "unavailable") {
+    return `unavailable (${safeInline(identity.reason)})`;
+  }
+  return `${safeInline(identity.repository)}#${identity.issue} / ${safeInline(identity.updatedAt)} / ${safeInline(identity.contentSha256)}`;
+}
+
+function sameTaskContract(
+  left: TrustedTaskContractIdentity,
+  right: TrustedTaskContractIdentity,
+) {
+  if (left.state !== right.state) return false;
+  if (left.state === "unavailable" && right.state === "unavailable") {
+    return left.reason === right.reason;
+  }
+  if (left.state === "resolved" && right.state === "resolved") {
+    return (
+      left.repository === right.repository &&
+      left.issue === right.issue &&
+      left.updatedAt === right.updatedAt &&
+      left.contentSha256 === right.contentSha256
+    );
+  }
+  return false;
 }
 
 function renderFinding(finding: ReviewFinding, index: number) {
@@ -112,8 +140,10 @@ export function renderReviewComment(envelope: ReviewExecutionEnvelope) {
     "### Review metadata",
     `- **Repository:** ${safeInline(envelope.identity.repository)}`,
     `- **Pull request:** #${envelope.identity.pullRequest}`,
+    `- **Review mode:** ${safeInline(envelope.identity.reviewMode)}`,
     `- **Base SHA:** ${safeInline(envelope.identity.baseSha)}`,
     `- **Head SHA:** ${safeInline(envelope.identity.headSha)}`,
+    `- **Trusted Task / PR contract:** ${renderTaskContract(envelope.identity.taskContract)}`,
     `- **Provider:** ${safeInline(provider.id)}`,
     `- **Provider role:** ${safeInline(provider.role)}`,
     `- **Model:** ${safeInline(provider.model)}`,
@@ -156,9 +186,9 @@ export function compareReviewFreshness(
 
   if (identity.repository !== current.pullRequest.repository) reasons.push("repository");
   if (identity.pullRequest !== current.pullRequest.number) reasons.push("pull_request");
+  if (identity.reviewMode !== current.reviewMode) reasons.push("review_mode");
   if (identity.baseSha !== current.pullRequest.base.sha) reasons.push("base_sha");
   if (identity.headSha !== current.pullRequest.head.sha) reasons.push("head_sha");
-  if (identity.policyCommitSha !== current.controls.identity.policyCommitSha) reasons.push("policy_commit");
   if (identity.policyBlobSha !== current.controls.identity.policyBlobSha) reasons.push("policy_blob");
   if (identity.outputContractBlobSha !== current.controls.identity.outputContractBlobSha) {
     reasons.push("output_contract_blob");
@@ -166,6 +196,9 @@ export function compareReviewFreshness(
   if (identity.profileBlobSha !== current.controls.identity.profileBlobSha) reasons.push("profile_blob");
   if (identity.rootContractBlobSha !== current.controls.identity.rootContractBlobSha) {
     reasons.push("root_contract_blob");
+  }
+  if (!sameTaskContract(identity.taskContract, current.controls.identity.taskContract)) {
+    reasons.push("task_contract");
   }
 
   return reasons.length === 0
