@@ -1,0 +1,131 @@
+name: AI Review Real Provider Probe
+
+on:
+  push:
+    branches:
+      - prod
+    paths:
+      - '.github/workflows/ai-review-real-provider-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      AI_REVIEW_GATEWAY_TOKEN: ${{ secrets.AI_REVIEW_GATEWAY_TOKEN }}
+      AI_REVIEW_HEALTH_URL: https://control.mira.tomz.io/api/v1/ai-review/health
+      AI_REVIEW_EXECUTION_URL: https://control.mira.tomz.io/api/v1/ai-review/review
+    steps:
+      - name: Verify configured CODE_REVIEW routine
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${AI_REVIEW_GATEWAY_TOKEN:-}" ]; then
+            echo '::error::AI_REVIEW_GATEWAY_TOKEN is unavailable to provider probe.'
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            --retry 5 --retry-delay 2 --retry-all-errors \
+            "$AI_REVIEW_HEALTH_URL" \
+            --output /tmp/ai-review-health.json
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const health = JSON.parse(fs.readFileSync('/tmp/ai-review-health.json', 'utf8'));
+          const routine = health.providerRoutes?.CODE_REVIEW?.routine;
+          if (!routine) throw new Error('CODE_REVIEW routine route is missing');
+          if (routine.state !== 'configured') {
+            throw new Error(`CODE_REVIEW routine is not configured: ${routine.state}`);
+          }
+          if (routine.provider !== 'minimax-cn-codeplan' || routine.model !== 'm3') {
+            throw new Error(`Unexpected routine target: ${routine.provider}/${routine.model}`);
+          }
+          console.log(`Real-provider probe target: ${routine.provider}/${routine.model} (${routine.driver})`);
+          NODE
+
+      - name: Execute one production review
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          payload='{"repository":"uichat-mira/mira-mobile","pullRequest":108}'
+          status="$(curl --silent --show-error \
+            --retry 1 --retry-delay 2 --retry-all-errors \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer ${AI_REVIEW_GATEWAY_TOKEN}" \
+            --data "$payload" \
+            --output /tmp/ai-review-execution.json \
+            --write-out '%{http_code}' \
+            "$AI_REVIEW_EXECUTION_URL")"
+
+          STATUS="$status" node <<'NODE'
+          const fs = require('node:fs');
+          const status = Number(process.env.STATUS);
+          const result = JSON.parse(fs.readFileSync('/tmp/ai-review-execution.json', 'utf8'));
+          const attempts = Array.isArray(result.execution?.attempts) ? result.execution.attempts : [];
+
+          const safeAttempts = attempts.map((attempt) => ({
+            provider: attempt.provider,
+            model: attempt.model,
+            role: attempt.role,
+            status: attempt.status,
+            latencyMs: attempt.latencyMs,
+            failureClass: attempt.failureClass ?? null,
+            usage: attempt.usage ?? null,
+          }));
+
+          console.log(`Review HTTP status: ${status}`);
+          console.log(`Review state: ${result.execution?.state ?? 'missing'}`);
+          console.log(`Attempts: ${JSON.stringify(safeAttempts)}`);
+
+          if (status !== 200 || result.execution?.state !== 'COMPLETED') {
+            throw new Error(
+              `Real provider review did not complete: HTTP ${status}, state=${result.execution?.state ?? 'missing'}, reason=${result.execution?.reason ?? 'none'}`,
+            );
+          }
+
+          if (result.identity?.repository !== 'uichat-mira/mira-mobile' || result.identity?.pullRequest !== 108) {
+            throw new Error(`Unexpected review identity: ${JSON.stringify(result.identity)}`);
+          }
+          if (result.identity?.reviewMode !== 'CODE_REVIEW') {
+            throw new Error(`Unexpected review mode: ${result.identity?.reviewMode}`);
+          }
+          if (result.execution.provider?.id !== 'minimax-cn-codeplan/m3') {
+            throw new Error(`Unexpected completed provider: ${result.execution.provider?.id}`);
+          }
+          if (result.execution.provider?.model !== 'MiniMax-M3') {
+            throw new Error(`Unexpected completed model: ${result.execution.provider?.model}`);
+          }
+          if (result.execution.provider?.role !== 'routine') {
+            throw new Error(`Unexpected completed provider role: ${result.execution.provider?.role}`);
+          }
+
+          const review = result.execution.review;
+          const attempt = attempts.at(-1);
+          const summary = [
+            '## AI Review real-provider probe',
+            '',
+            `- Repository: ${result.identity.repository}#${result.identity.pullRequest}`,
+            `- Review mode: ${result.identity.reviewMode}`,
+            `- Provider: ${result.execution.provider.id}`,
+            `- Model: ${result.execution.provider.model}`,
+            `- Verdict: ${review?.verdict ?? 'missing'}`,
+            `- Findings: ${Array.isArray(review?.findings) ? review.findings.length : 'missing'}`,
+            `- Validation gaps: ${Array.isArray(review?.validationGaps) ? review.validationGaps.length : 'missing'}`,
+            `- Latency: ${attempt?.latencyMs ?? 'missing'} ms`,
+            `- Input tokens: ${attempt?.usage?.inputTokens ?? 'unreported'}`,
+            `- Output tokens: ${attempt?.usage?.outputTokens ?? 'unreported'}`,
+            `- Total tokens: ${attempt?.usage?.totalTokens ?? 'unreported'}`,
+          ].join('\n');
+
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`);
+          console.log(
+            `Real provider review completed: verdict=${review?.verdict}, latencyMs=${attempt?.latencyMs}, usage=${JSON.stringify(attempt?.usage ?? {})}`,
+          );
+          NODE
