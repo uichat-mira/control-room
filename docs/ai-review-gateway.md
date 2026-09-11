@@ -1,10 +1,10 @@
 # Mira AI Review Gateway
 
-Status: `v0 — trusted review package`
+Status: `v0 — trusted package + unpublished execution`
 
-The Mira AI Review Gateway lives in `uichat-mira/control-room`.
+The Mira AI Review Gateway is a logical subsystem inside the existing `uichat-mira/control-room` Cloudflare Worker. V1 does not use a separate Review Gateway service.
 
-Organization policy and normalized output contracts remain owned by `uichat-mira/.github/ai-review`.
+Organization policy and normalized output contracts are owned by `uichat-mira/.github/ai-review`.
 
 ## Responsibility split
 
@@ -16,30 +16,38 @@ uichat-mira/.github
      └─ REPO-PROFILE-TEMPLATE.md
           ↓ trusted Organization controls
 
-repository PR + base-side .ai/review-profile.md
+repository PR + base-side repository controls
           ↓
-control-room AI Review Gateway
-  ├─ reconstruct trusted review package
-  ├─ bind base/head/control identities
-  ├─ provider routing            (next phase)
-  ├─ output normalization        (next phase)
-  └─ deterministic publishing    (next phase)
+Control Room / AI Review Gateway
+  ├─ rebuild trusted package
+  ├─ bind exact base/head/control identities
+  ├─ select configured provider slot
+  ├─ call provider adapter
+  ├─ normalize Mira review result
+  ├─ compare freshness / render deterministic output
+  └─ GitHub publication                (not enabled yet)
 ```
 
-A review provider is an execution backend. It does not own Mira's review policy or verdict contract.
+A provider is an execution backend. It does not own Mira's policy, verdict vocabulary, trust boundary, or publication semantics.
 
-## v0 endpoints
+## Endpoints
 
 ### `GET /api/v1/ai-review/health`
 
-Public-safe capability status. It exposes configuration state, never credential values.
+Public-safe capability status. It exposes caller/provider slot state but never credential values.
 
 ### `POST /api/v1/ai-review/package`
 
-Private endpoint. Organization repository callers use the shared Organization GitHub token:
+Private trusted-package inspection endpoint.
+
+### `POST /api/v1/ai-review/review`
+
+Private unpublished execution endpoint. It rebuilds the same trusted package, executes configured Primary/Fallback providers, normalizes the result, and returns execution metadata. It does not write to GitHub.
+
+Private callers send:
 
 ```text
-Authorization: Bearer <ORG_GITHUB_TOKEN>
+Authorization: Bearer <AI_REVIEW_GATEWAY_TOKEN>
 Content-Type: application/json
 ```
 
@@ -52,98 +60,195 @@ Request body:
 }
 ```
 
-The caller is intentionally not allowed to supply head SHA, base SHA, diff, policy text, or repository review controls as authoritative input.
+The caller cannot supply authoritative head/base SHA, diff, policy text, repository controls, provider, model, endpoint, or provider credential.
 
-The Gateway re-fetches those facts from GitHub using the same Organization credential.
+## Caller credential boundary
 
-## Shared-token boundary
+`AI_REVIEW_GATEWAY_TOKEN` is a purpose-specific internal bearer. It is deliberately separate from GitHub credentials.
 
-`ORG_GITHUB_TOKEN` is intentionally reused for both:
+Production uses:
 
-- repository caller authentication to the AI Review Gateway;
-- Control Room authenticated reads from GitHub.
+- `AI_REVIEW_GATEWAY_TOKEN` — authenticates trusted calls to private AI Review routes;
+- `GITHUB_READ_TOKEN` — lets Control Room reconstruct trusted package data from GitHub;
+- future GitHub publication credential — not implemented yet and must remain Worker-only and separate from both values above.
 
-Control Room deploys that Organization secret as `GITHUB_READ_TOKEN`. The outer Gateway maps the same runtime value into the AI Review Gateway caller-auth slot, so there is no second Review Gateway secret to provision or rotate.
-
-Because this token has GitHub authority, any repository workflow that receives it must remain a thin trusted caller. While `ORG_GITHUB_TOKEN` is present, the caller must not:
-
-- checkout the PR head;
-- execute PR-controlled scripts, packages, Actions, configuration, or generated commands;
-- pass the token to model/provider input;
-- echo the token or include it in artifacts/logs;
-- expose it to a job whose behavior can be changed by the PR being reviewed.
-
-The intended caller gathers only trusted GitHub event metadata and calls Control Room. Review content is reconstructed by Control Room itself.
+Repository callers that receive the Gateway bearer must remain thin trusted callers. They must not checkout PR head code, execute PR-controlled scripts/packages/configuration, expose the token to model input, or write it to logs/artifacts.
 
 ## Trust model
 
 The PR head is untrusted review content.
 
-Gateway v0 therefore:
+The Gateway therefore:
 
 - accepts only repositories under `uichat-mira`;
-- accepts only same-repository PRs, matching the current Mobile review baseline;
-- fetches PR metadata directly from GitHub and freezes the observed base/head commit SHAs;
-- fetches the diff from GitHub's compare endpoint using that exact immutable base/head pair, so a concurrent push cannot silently change the packaged diff;
-- resolves the configured Organization policy ref to one immutable commit SHA before reading any policy file;
-- fetches Organization `POLICY.md` and `OUTPUT-CONTRACT.md` from that same policy commit;
-- fetches `.ai/review-profile.md` and `AGENTS.md` from the exact PR base SHA;
+- currently accepts same-repository PRs;
+- re-fetches PR metadata from GitHub and freezes exact base/head SHAs;
+- fetches the compare diff from that immutable pair;
+- resolves Organization policy to one immutable commit before reading policy/output contracts;
+- fetches repository profile/root controls from the exact PR base SHA;
 - does not checkout or execute PR code;
-- records the policy commit SHA and blob SHA of every trusted control included in the package;
-- records exact PR head and base SHA;
-- reports diff truncation and missing repo profile as explicit package gaps.
+- records trusted-control blob identities and exact PR identity;
+- keeps runtime review mode, deterministic gaps, and trusted contract identity in trusted system context;
+- keeps PR title/body/diff in untrusted review evidence;
+- represents missing trusted evidence as typed validation gaps rather than inventing defects.
 
-PR-controlled agent/model/plugin configuration may later be included as reviewable code, but it is never loaded as trusted reviewer instruction by this package builder.
+## Review modes
 
-## Configuration
-
-Worker runtime bindings:
-
-```text
-GITHUB_READ_TOKEN
-AI_REVIEW_POLICY_REF   optional, default: main
-```
-
-The current Control Room deployment maps the Organization Actions secret `ORG_GITHUB_TOKEN` to `GITHUB_READ_TOKEN`.
-
-No separate `AI_REVIEW_GATEWAY_TOKEN` is required. The Gateway intentionally reuses the same runtime credential for caller authentication.
-
-## Review package identity
-
-The v0 response includes:
+Supported branch transitions are deterministic and fail closed:
 
 ```text
-packageVersion
-runtimeVersion
-repository + PR number
-base ref + base SHA
-head ref + head SHA
-resolved Organization policy commit SHA
-Organization policy blob SHA
-Output contract blob SHA
-Repo profile blob SHA (when present)
-Root AGENTS.md blob SHA (when present)
-exact compare-diff source pair
-diff truncation state
-package gaps
+feat/* -> dev   CODE_REVIEW
+dev -> test     PROMOTION_REVIEW
+test -> prod    RELEASE_REVIEW
 ```
 
-This identity is the input boundary for later provider execution and stale-review detection.
+Unsupported transitions are rejected rather than guessed.
 
-## Deliberately not in v0
+## Provider slots
 
-The first slice does not yet:
+V1 exposes two runtime slots:
 
-- call OpenCode, CodeRabbit, Codex, OpenAI, or another model/provider;
-- publish or update PR comments;
-- create GitHub review states;
-- create Issues or task cards;
-- parse repository-specific context selectors from the profile;
-- reproduce Mobile's local `review:pull` handoff;
-- claim review equivalence with the historical Mobile OpenCode runtime.
+```text
+Primary
+Fallback
+```
 
-Those capabilities are added only after the trusted package contract is verified.
+`reserve` and `judge` remain architectural extension points and are not current V1 delivery requirements.
 
-## Next slice
+A slot is one configured provider instance. The generic OpenAI-compatible adapter is a protocol implementation, not a vendor decision.
 
-The next implementation slice should add provider abstraction and normalized review execution on top of the immutable package boundary, without allowing a provider to redefine policy, verdicts, or publication semantics.
+Slot health states are:
+
+```text
+unconfigured
+configured
+partial
+invalid
+```
+
+Production deployment accepts only `unconfigured` or `configured`. A partial or invalid provider slot fails deployment before Worker mutation, and post-deploy smoke rejects either state if it somehow reaches production.
+
+## Provider deployment configuration
+
+GitHub Actions is the trusted configuration source for provider slots:
+
+- provider API keys are GitHub Actions **Secrets** and become encrypted Worker secrets;
+- provider metadata/capability settings are GitHub Actions **Variables** and become ordinary Worker vars through `wrangler deploy --var`;
+- provider values are never supplied by the PR request being reviewed.
+
+This split is intentional. Wrangler treats ordinary vars as deployment-owned configuration, while encrypted secrets have a separate lifecycle and are not removed merely because a later deploy omits them.
+
+### Primary
+
+Secret:
+
+```text
+AI_REVIEW_PRIMARY_API_KEY
+```
+
+Variables:
+
+```text
+AI_REVIEW_PRIMARY_ID
+AI_REVIEW_PRIMARY_ENDPOINT
+AI_REVIEW_PRIMARY_MODEL
+AI_REVIEW_PRIMARY_RESPONSE_FORMAT
+AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS
+AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS
+AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER
+```
+
+### Fallback
+
+Secret:
+
+```text
+AI_REVIEW_FALLBACK_API_KEY
+```
+
+Variables:
+
+```text
+AI_REVIEW_FALLBACK_ID
+AI_REVIEW_FALLBACK_ENDPOINT
+AI_REVIEW_FALLBACK_MODEL
+AI_REVIEW_FALLBACK_RESPONSE_FORMAT
+AI_REVIEW_FALLBACK_MAX_PROMPT_CHARACTERS
+AI_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS
+AI_REVIEW_FALLBACK_OUTPUT_TOKEN_PARAMETER
+```
+
+Required fields for a configured slot are `ID`, `ENDPOINT`, `API_KEY`, and `MODEL`.
+
+`RESPONSE_FORMAT` accepts `json_object` or `none` and defaults to `json_object` when omitted.
+
+`MAX_PROMPT_CHARACTERS` is an optional conservative pre-request capacity guard. It is not a tokenizer or a claim about the provider's exact token context window.
+
+`MAX_OUTPUT_TOKENS` and `OUTPUT_TOKEN_PARAMETER` are optional but must be configured together. `OUTPUT_TOKEN_PARAMETER` accepts:
+
+```text
+max_tokens
+max_completion_tokens
+```
+
+The output budget is sent to the provider before generation. The existing Worker response-size bound remains a separate transport safety limit.
+
+### Disabling or changing a slot
+
+A slot must be changed as one complete configuration. Supplying only some required fields is `partial` and blocks deployment.
+
+To disable a slot, clear all of that slot's GitHub Variables and its API-key Secret. On the next production deployment:
+
+1. the deploy workflow validates the desired GitHub-side slot as `unconfigured`;
+2. if an old managed provider API-key secret still exists on the Worker, the workflow explicitly deletes that secret with Wrangler's bulk-secret deletion path;
+3. the normal Worker deploy omits the provider's plain vars, so Wrangler removes the old ordinary vars as part of its source-of-truth deployment behavior;
+4. post-deploy health must report only `unconfigured` or `configured`, never `partial` or `invalid`.
+
+This explicit reconciliation prevents a previously configured provider key from surviving as a hidden or "ghost" provider after the GitHub configuration has been cleared.
+
+## Provider failure semantics
+
+Provider technical failures do not become review verdicts. Stable classes include:
+
+```text
+input_limit
+quota
+rate_limit
+timeout
+provider_auth
+provider_unavailable
+malformed_response
+unknown
+```
+
+A failed Primary may fall through to an eligible Fallback. When no provider is configured, or all eligible providers fail, execution returns `REVIEW_UNAVAILABLE`; it never manufactures `NO_BLOCKING_FINDINGS`.
+
+## Current production state
+
+At the time of this document update:
+
+```text
+mode      review-execution-unpublished
+caller    configured
+Primary   unconfigured
+Fallback  unconfigured
+```
+
+No provider/model has been selected by Organization policy. Historical Mobile provider/model configuration is not automatically the Organization choice.
+
+## Publication boundary
+
+The deterministic renderer and stale comparator already exist, but GitHub comment mutation is not enabled.
+
+Before publication is enabled, V1 still requires:
+
+- a separate Worker-only, least-privilege GitHub write credential limited to the Mobile pilot surface;
+- immediate trusted-identity re-check before each write;
+- deterministic create/update ownership using the Mira review marker;
+- explicit stale/unavailable behavior so an obsolete clean review cannot remain current.
+
+## Capacity rule
+
+Control Room remains the runtime carrier for Review Gateway V1. Do not split a standalone Review Gateway merely because provider calls can be slow.
+
+The complete real-provider path must still be measured on the actual Cloudflare plan before claiming CPU/resource headroom. Provider network wait and Worker CPU are different costs; package-only/no-provider smoke is not sufficient evidence for the full path.

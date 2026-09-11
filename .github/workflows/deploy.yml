@@ -50,6 +50,22 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
       AI_REVIEW_GATEWAY_TOKEN: ${{ secrets.AI_REVIEW_GATEWAY_TOKEN }}
+      AI_REVIEW_PRIMARY_ID: ${{ vars.AI_REVIEW_PRIMARY_ID }}
+      AI_REVIEW_PRIMARY_ENDPOINT: ${{ vars.AI_REVIEW_PRIMARY_ENDPOINT }}
+      AI_REVIEW_PRIMARY_API_KEY: ${{ secrets.AI_REVIEW_PRIMARY_API_KEY }}
+      AI_REVIEW_PRIMARY_MODEL: ${{ vars.AI_REVIEW_PRIMARY_MODEL }}
+      AI_REVIEW_PRIMARY_RESPONSE_FORMAT: ${{ vars.AI_REVIEW_PRIMARY_RESPONSE_FORMAT }}
+      AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS: ${{ vars.AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS }}
+      AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS: ${{ vars.AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS }}
+      AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER: ${{ vars.AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER }}
+      AI_REVIEW_FALLBACK_ID: ${{ vars.AI_REVIEW_FALLBACK_ID }}
+      AI_REVIEW_FALLBACK_ENDPOINT: ${{ vars.AI_REVIEW_FALLBACK_ENDPOINT }}
+      AI_REVIEW_FALLBACK_API_KEY: ${{ secrets.AI_REVIEW_FALLBACK_API_KEY }}
+      AI_REVIEW_FALLBACK_MODEL: ${{ vars.AI_REVIEW_FALLBACK_MODEL }}
+      AI_REVIEW_FALLBACK_RESPONSE_FORMAT: ${{ vars.AI_REVIEW_FALLBACK_RESPONSE_FORMAT }}
+      AI_REVIEW_FALLBACK_MAX_PROMPT_CHARACTERS: ${{ vars.AI_REVIEW_FALLBACK_MAX_PROMPT_CHARACTERS }}
+      AI_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS: ${{ vars.AI_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS }}
+      AI_REVIEW_FALLBACK_OUTPUT_TOKEN_PARAMETER: ${{ vars.AI_REVIEW_FALLBACK_OUTPUT_TOKEN_PARAMETER }}
       CONTROL_ROOM_URL: https://uichat-mira-control-room.dangjingtao.workers.dev
     steps:
       - name: Checkout
@@ -77,6 +93,22 @@ jobs:
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
           test -n "${AI_REVIEW_GATEWAY_TOKEN:-}"
 
+      - name: Validate AI Review provider slots
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const { buildReviewProviderRegistry } = await import('./src/ai-review-provider-registry.ts');
+          const { slots } = buildReviewProviderRegistry(process.env);
+          for (const [role, state] of Object.entries(slots)) {
+            if (state !== 'unconfigured' && state !== 'configured') {
+              console.error(`::error::AI Review ${role} provider slot is ${state}; refusing deployment.`);
+              process.exit(1);
+            }
+          }
+          console.log(`AI Review provider slots validated: primary=${slots.primary}, fallback=${slots.fallback}`);
+          NODE
+
       - name: Guard current prod head
         id: deploy_guard
         shell: bash
@@ -101,7 +133,57 @@ jobs:
             echo "Skipping stale deploy: run=${GITHUB_SHA}, prod=${latest_sha}"
           fi
 
-      - name: Prepare runtime configuration
+      - name: Reconcile disabled AI Review provider key secrets
+        if: steps.deploy_guard.outputs.deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          npx wrangler secret list --name uichat-mira-control-room --format json \
+            > /tmp/control-room-secret-list.json
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const remote = new Set(
+            JSON.parse(fs.readFileSync('/tmp/control-room-secret-list.json', 'utf8'))
+              .map((secret) => secret.name),
+          );
+          const managed = [
+            'AI_REVIEW_PRIMARY_API_KEY',
+            'AI_REVIEW_FALLBACK_API_KEY',
+          ];
+          const deletions = {};
+          for (const name of managed) {
+            if (!process.env[name] && remote.has(name)) deletions[name] = null;
+          }
+          fs.writeFileSync(
+            '/tmp/ai-review-provider-secret-deletions.json',
+            JSON.stringify(deletions),
+          );
+          console.log(
+            `Provider API-key deletions required: ${Object.keys(deletions).join(', ') || 'none'}`,
+          );
+          NODE
+
+          if node - <<'NODE'
+          const fs = require('node:fs');
+          const deletions = JSON.parse(
+            fs.readFileSync('/tmp/ai-review-provider-secret-deletions.json', 'utf8'),
+          );
+          process.exit(Object.keys(deletions).length > 0 ? 0 : 1);
+          NODE
+          then
+            npx wrangler secret bulk \
+              /tmp/ai-review-provider-secret-deletions.json \
+              --name uichat-mira-control-room
+          fi
+
+          rm -f \
+            /tmp/control-room-secret-list.json \
+            /tmp/ai-review-provider-secret-deletions.json
+
+      - name: Prepare runtime secrets
         if: steps.deploy_guard.outputs.deploy == 'true'
         shell: bash
         run: |
@@ -112,15 +194,53 @@ jobs:
           if [ -n "${ORG_GITHUB_TOKEN:-}" ]; then
             printf 'GITHUB_READ_TOKEN=%s\n' "$ORG_GITHUB_TOKEN" >> /tmp/control-room-secrets.env
           fi
+          if [ -n "${AI_REVIEW_PRIMARY_API_KEY:-}" ]; then
+            printf 'AI_REVIEW_PRIMARY_API_KEY=%s\n' "$AI_REVIEW_PRIMARY_API_KEY" >> /tmp/control-room-secrets.env
+          fi
+          if [ -n "${AI_REVIEW_FALLBACK_API_KEY:-}" ]; then
+            printf 'AI_REVIEW_FALLBACK_API_KEY=%s\n' "$AI_REVIEW_FALLBACK_API_KEY" >> /tmp/control-room-secrets.env
+          fi
 
       - name: Deploy to Cloudflare
         if: steps.deploy_guard.outputs.deploy == 'true'
         shell: bash
         run: |
           set -euo pipefail
+
+          deploy_args=(
+            --var "CLOUDFLARE_ACCOUNT_ID:${CLOUDFLARE_ACCOUNT_ID}"
+            --var "DEPLOYED_COMMIT:${GITHUB_SHA}"
+          )
+
+          append_var_if_set() {
+            name="$1"
+            value="${!name:-}"
+            if [ -n "$value" ]; then
+              deploy_args+=(--var "${name}:${value}")
+            fi
+          }
+
+          for name in \
+            AI_REVIEW_PRIMARY_ID \
+            AI_REVIEW_PRIMARY_ENDPOINT \
+            AI_REVIEW_PRIMARY_MODEL \
+            AI_REVIEW_PRIMARY_RESPONSE_FORMAT \
+            AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS \
+            AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS \
+            AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER \
+            AI_REVIEW_FALLBACK_ID \
+            AI_REVIEW_FALLBACK_ENDPOINT \
+            AI_REVIEW_FALLBACK_MODEL \
+            AI_REVIEW_FALLBACK_RESPONSE_FORMAT \
+            AI_REVIEW_FALLBACK_MAX_PROMPT_CHARACTERS \
+            AI_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS \
+            AI_REVIEW_FALLBACK_OUTPUT_TOKEN_PARAMETER
+          do
+            append_var_if_set "$name"
+          done
+
           npx wrangler deploy \
-            --var "CLOUDFLARE_ACCOUNT_ID:${CLOUDFLARE_ACCOUNT_ID}" \
-            --var "DEPLOYED_COMMIT:${GITHUB_SHA}" \
+            "${deploy_args[@]}" \
             --secrets-file /tmp/control-room-secrets.env
 
           rm -f /tmp/control-room-secrets.env
