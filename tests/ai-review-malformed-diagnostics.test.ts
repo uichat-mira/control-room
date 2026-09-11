@@ -1,0 +1,196 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { ReviewPackage } from "../src/ai-review-package.ts";
+import { OpenAICompatibleReviewProvider } from "../src/ai-review-provider-openai-compatible.ts";
+import {
+  ReviewProviderError,
+  executeReviewWithFallback,
+  type ReviewProvider,
+} from "../src/ai-review-runtime.ts";
+
+function reviewPackage(): ReviewPackage {
+  return {
+    packageVersion: "mira-ai-review-package/v0",
+    runtimeVersion: "control-room-ai-review/v0",
+    generatedAt: "2026-09-11T00:00:00.000Z",
+    reviewMode: "CODE_REVIEW",
+    trust: {
+      headIsUntrusted: true,
+      executesPullRequestCode: false,
+      organizationControlsSource: "uichat-mira/.github@3333333333333333333333333333333333333333",
+      requestedOrganizationPolicyRef: "main",
+      repositoryControlsSource: "uichat-mira/example@1111111111111111111111111111111111111111",
+    },
+    pullRequest: {
+      repository: "uichat-mira/example",
+      number: 12,
+      title: "Malformed response diagnostics",
+      body: null,
+      author: "tester",
+      draft: false,
+      base: { ref: "dev", sha: "1111111111111111111111111111111111111111" },
+      head: { ref: "feat/example", sha: "2222222222222222222222222222222222222222" },
+    },
+    controls: {
+      policy: {
+        source: "organization",
+        repository: "uichat-mira/.github",
+        path: "ai-review/POLICY.md",
+        ref: "3333333333333333333333333333333333333333",
+        blobSha: "4444444444444444444444444444444444444444",
+        content: "POLICY",
+      },
+      outputContract: {
+        source: "organization",
+        repository: "uichat-mira/.github",
+        path: "ai-review/OUTPUT-CONTRACT.md",
+        ref: "3333333333333333333333333333333333333333",
+        blobSha: "5555555555555555555555555555555555555555",
+        content: "OUTPUT CONTRACT",
+      },
+      repositoryProfile: null,
+      rootContract: null,
+      taskContract: {
+        state: "unavailable",
+        reason: "trusted_lookup_not_configured",
+      },
+      identity: {
+        policyCommitSha: "3333333333333333333333333333333333333333",
+        policyBlobSha: "4444444444444444444444444444444444444444",
+        outputContractBlobSha: "5555555555555555555555555555555555555555",
+        profileBlobSha: null,
+        rootContractBlobSha: null,
+        taskContract: {
+          state: "unavailable",
+          reason: "trusted_lookup_not_configured",
+        },
+      },
+    },
+    diff: {
+      source: "1111111111111111111111111111111111111111...2222222222222222222222222222222222222222",
+      content: "diff --git a/a.ts b/a.ts\n+const answer = 42;\n",
+      chars: 47,
+      originalChars: 47,
+      truncated: false,
+      limitChars: 180000,
+    },
+    gaps: [],
+  };
+}
+
+function provider() {
+  return new OpenAICompatibleReviewProvider({
+    id: "minimax-cn-codeplan/m3",
+    role: "routine",
+    endpoint: "https://provider.example/v1/chat/completions",
+    apiKey: "secret",
+    model: "MiniMax-M3",
+    responseFormat: "none",
+  });
+}
+
+async function failureFor(content: unknown) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({
+      choices: [{ message: { content } }],
+      usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+    });
+
+  try {
+    await provider().review(reviewPackage());
+  } catch (error) {
+    return error;
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  throw new Error("Expected provider review to fail");
+}
+
+test("classifies a fenced review without logging or returning provider content", async () => {
+  const error = await failureFor(
+    '```json\n{"verdict":"NO_BLOCKING_FINDINGS","findings":[],"validationGaps":[]}\n```',
+  );
+  assert.ok(error instanceof ReviewProviderError);
+  assert.equal(error.failureClass, "malformed_response");
+  assert.equal(error.failureDetail, "review_json_fenced");
+  assert.deepEqual(error.usage, {
+    inputTokens: 120,
+    outputTokens: 30,
+    totalTokens: 150,
+  });
+  assert.equal(error.message.includes("NO_BLOCKING_FINDINGS"), false);
+});
+
+test("distinguishes non-JSON review text from syntactically invalid JSON", async () => {
+  const prose = await failureFor("Here is the requested review.");
+  assert.ok(prose instanceof ReviewProviderError);
+  assert.equal(prose.failureDetail, "non_json_review_text");
+
+  const invalidJson = await failureFor('{"verdict":');
+  assert.ok(invalidJson instanceof ReviewProviderError);
+  assert.equal(invalidJson.failureDetail, "invalid_review_json");
+});
+
+test("preserves provider usage and safe detail on failed attempts", async () => {
+  const failing: ReviewProvider<null> = {
+    id: "provider/m3",
+    model: "MiniMax-M3",
+    role: "routine",
+    async review() {
+      throw new ReviewProviderError("generic safe message", "malformed_response", {
+        failureDetail: "review_json_fenced",
+        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+      });
+    },
+  };
+
+  const result = await executeReviewWithFallback(null, [failing]);
+  assert.equal(result.state, "REVIEW_UNAVAILABLE");
+  assert.deepEqual(result.attempts[0], {
+    provider: "provider/m3",
+    model: "MiniMax-M3",
+    role: "routine",
+    status: "failed",
+    latencyMs: result.attempts[0].latencyMs,
+    failureClass: "malformed_response",
+    failureDetail: "review_json_fenced",
+    usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+  });
+});
+
+test("marks a structurally invalid review contract after valid provider JSON", async () => {
+  const invalidContract: ReviewProvider<null> = {
+    id: "provider/m3",
+    model: "MiniMax-M3",
+    role: "routine",
+    async review() {
+      return {
+        output: { verdict: "PASS" },
+        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+      };
+    },
+  };
+
+  const result = await executeReviewWithFallback(null, [invalidContract]);
+  assert.equal(result.state, "REVIEW_UNAVAILABLE");
+  assert.equal(result.attempts[0].failureClass, "malformed_response");
+  assert.equal(result.attempts[0].failureDetail, "invalid_review_contract");
+  assert.deepEqual(result.attempts[0].usage, {
+    inputTokens: 10,
+    outputTokens: 2,
+    totalTokens: 12,
+  });
+});
+
+test("classifies missing message content while retaining usage", async () => {
+  const error = await failureFor(null);
+  assert.ok(error instanceof ReviewProviderError);
+  assert.equal(error.failureDetail, "missing_message_content");
+  assert.deepEqual(error.usage, {
+    inputTokens: 120,
+    outputTokens: 30,
+    totalTokens: 150,
+  });
+});

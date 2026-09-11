@@ -19,6 +19,14 @@ export type ReviewFailureClass =
   | "malformed_response"
   | "input_limit"
   | "unknown";
+export type ReviewFailureDetail =
+  | "response_too_large"
+  | "invalid_chat_response"
+  | "missing_message_content"
+  | "review_json_fenced"
+  | "non_json_review_text"
+  | "invalid_review_json"
+  | "invalid_review_contract";
 
 export interface ReviewFinding {
   severity: MiraReviewSeverity;
@@ -70,6 +78,7 @@ export interface ProviderAttempt {
   status: "success" | "failed";
   latencyMs: number;
   failureClass?: ReviewFailureClass;
+  failureDetail?: ReviewFailureDetail;
   usage?: ReviewProviderUsage;
 }
 
@@ -94,11 +103,22 @@ export type ReviewExecutionResult = CompletedReviewExecution | UnavailableReview
 
 export class ReviewProviderError extends Error {
   readonly failureClass: ReviewFailureClass;
+  readonly failureDetail: ReviewFailureDetail | undefined;
+  readonly usage: ReviewProviderUsage | undefined;
 
-  constructor(message: string, failureClass: ReviewFailureClass) {
+  constructor(
+    message: string,
+    failureClass: ReviewFailureClass,
+    options: {
+      failureDetail?: ReviewFailureDetail;
+      usage?: ReviewProviderUsage;
+    } = {},
+  ) {
     super(message);
     this.name = "ReviewProviderError";
     this.failureClass = failureClass;
+    this.failureDetail = options.failureDetail;
+    this.usage = options.usage;
   }
 }
 
@@ -235,10 +255,32 @@ export function failureClassForHttpStatus(status: number): ReviewFailureClass {
   return "unknown";
 }
 
-function technicalFailure(error: unknown): ReviewFailureClass {
-  if (error instanceof ReviewProviderError) return error.failureClass;
-  if (error instanceof ReviewNormalizationError) return "malformed_response";
-  return "unknown";
+function technicalFailure(
+  error: unknown,
+  providerUsage?: ReviewProviderUsage,
+): {
+  failureClass: ReviewFailureClass;
+  failureDetail?: ReviewFailureDetail;
+  usage?: ReviewProviderUsage;
+} {
+  if (error instanceof ReviewProviderError) {
+    return {
+      failureClass: error.failureClass,
+      ...(error.failureDetail ? { failureDetail: error.failureDetail } : {}),
+      ...(error.usage ?? providerUsage ? { usage: error.usage ?? providerUsage } : {}),
+    };
+  }
+  if (error instanceof ReviewNormalizationError) {
+    return {
+      failureClass: "malformed_response",
+      failureDetail: "invalid_review_contract",
+      ...(providerUsage ? { usage: providerUsage } : {}),
+    };
+  }
+  return {
+    failureClass: "unknown",
+    ...(providerUsage ? { usage: providerUsage } : {}),
+  };
 }
 
 export async function executeReviewWithFallback<Input>(
@@ -257,8 +299,10 @@ export async function executeReviewWithFallback<Input>(
 
   for (const provider of providers) {
     const startedAt = Date.now();
+    let providerUsage: ReviewProviderUsage | undefined;
     try {
       const response = await provider.review(input);
+      providerUsage = response.usage;
       const review = normalizeProviderReview(response.output);
       attempts.push({
         provider: provider.id,
@@ -279,13 +323,14 @@ export async function executeReviewWithFallback<Input>(
         attempts,
       };
     } catch (error) {
+      const failure = technicalFailure(error, providerUsage);
       attempts.push({
         provider: provider.id,
         model: provider.model,
         role: provider.role,
         status: "failed",
         latencyMs: Date.now() - startedAt,
-        failureClass: technicalFailure(error),
+        ...failure,
       });
     }
   }
