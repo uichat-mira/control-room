@@ -17,6 +17,7 @@ export type ReviewFailureClass =
   | "provider_unavailable"
   | "provider_auth"
   | "malformed_response"
+  | "input_limit"
   | "unknown";
 
 export interface ReviewFinding {
@@ -224,6 +225,7 @@ export function normalizeProviderReview(value: unknown): NormalizedReview {
 
 export function failureClassForHttpStatus(status: number): ReviewFailureClass {
   if (status === 401 || status === 403) return "provider_auth";
+  if (status === 402) return "quota";
   if (status === 408 || status === 504) return "timeout";
   if (status === 429) return "rate_limit";
   if (status >= 500 && status <= 599) return "provider_unavailable";

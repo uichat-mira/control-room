@@ -86,6 +86,7 @@ test("requires structured conflict detail for CONTRACT_CONFLICT", () => {
 
 test("maps provider HTTP failures into stable technical classes", () => {
   assert.equal(failureClassForHttpStatus(401), "provider_auth");
+  assert.equal(failureClassForHttpStatus(402), "quota");
   assert.equal(failureClassForHttpStatus(429), "rate_limit");
   assert.equal(failureClassForHttpStatus(504), "timeout");
   assert.equal(failureClassForHttpStatus(503), "provider_unavailable");

@@ -49,6 +49,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+      AI_REVIEW_GATEWAY_TOKEN: ${{ secrets.AI_REVIEW_GATEWAY_TOKEN }}
       CONTROL_ROOM_URL: https://uichat-mira-control-room.dangjingtao.workers.dev
     steps:
       - name: Checkout
@@ -68,12 +69,13 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Validate Cloudflare deployment credentials
+      - name: Validate deployment credentials
         shell: bash
         run: |
           set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          test -n "${AI_REVIEW_GATEWAY_TOKEN:-}"
 
       - name: Guard current prod head
         id: deploy_guard
@@ -106,6 +108,7 @@ jobs:
           set -euo pipefail
           umask 077
           printf 'CLOUDFLARE_READ_TOKEN=%s\n' "$CLOUDFLARE_API_TOKEN" > /tmp/control-room-secrets.env
+          printf 'AI_REVIEW_GATEWAY_TOKEN=%s\n' "$AI_REVIEW_GATEWAY_TOKEN" >> /tmp/control-room-secrets.env
           if [ -n "${ORG_GITHUB_TOKEN:-}" ]; then
             printf 'GITHUB_READ_TOKEN=%s\n' "$ORG_GITHUB_TOKEN" >> /tmp/control-room-secrets.env
           fi

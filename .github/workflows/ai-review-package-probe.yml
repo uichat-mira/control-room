@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
-      ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+      AI_REVIEW_GATEWAY_TOKEN: ${{ secrets.AI_REVIEW_GATEWAY_TOKEN }}
       AI_REVIEW_PACKAGE_URL: https://control.mira.tomz.io/api/v1/ai-review/package
       TARGET_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && inputs.repository || 'uichat-mira/mira-mobile' }}
       TARGET_PULL_REQUEST: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request || '108' }}
@@ -45,8 +45,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "${ORG_GITHUB_TOKEN:-}" ]; then
-            echo '::error::ORG_GITHUB_TOKEN is unavailable to Control Room.'
+          if [ -z "${AI_REVIEW_GATEWAY_TOKEN:-}" ]; then
+            echo '::error::AI_REVIEW_GATEWAY_TOKEN is unavailable to Control Room.'
             exit 1
           fi
 
@@ -68,7 +68,7 @@ jobs:
           curl --fail --silent --show-error \
             --retry 3 --retry-delay 2 --retry-all-errors \
             -H 'Content-Type: application/json' \
-            -H "Authorization: Bearer ${ORG_GITHUB_TOKEN}" \
+            -H "Authorization: Bearer ${AI_REVIEW_GATEWAY_TOKEN}" \
             --data "$payload" \
             "$AI_REVIEW_PACKAGE_URL" \
             --output /tmp/ai-review-package.json

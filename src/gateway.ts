@@ -1,3 +1,4 @@
+import { sharedAiReviewEnv } from "./ai-review-env";
 import { handleAiReviewRequest, type AiReviewEnv } from "./ai-review";
 import {
   renderGitHubOverviewSvg,
@@ -108,24 +109,6 @@ function validateMcpOrigin(request: Request): Response | null {
   }
 
   return new Response("MCP origin is not allowed", { status: 403 });
-}
-
-function sharedAiReviewEnv(env: Env): AiReviewEnv {
-  return {
-    GITHUB_READ_TOKEN: env.GITHUB_READ_TOKEN,
-    AI_REVIEW_GATEWAY_TOKEN: env.GITHUB_READ_TOKEN,
-    AI_REVIEW_POLICY_REF: env.AI_REVIEW_POLICY_REF,
-    AI_REVIEW_PRIMARY_ID: env.AI_REVIEW_PRIMARY_ID,
-    AI_REVIEW_PRIMARY_ENDPOINT: env.AI_REVIEW_PRIMARY_ENDPOINT,
-    AI_REVIEW_PRIMARY_API_KEY: env.AI_REVIEW_PRIMARY_API_KEY,
-    AI_REVIEW_PRIMARY_MODEL: env.AI_REVIEW_PRIMARY_MODEL,
-    AI_REVIEW_PRIMARY_RESPONSE_FORMAT: env.AI_REVIEW_PRIMARY_RESPONSE_FORMAT,
-    AI_REVIEW_FALLBACK_ID: env.AI_REVIEW_FALLBACK_ID,
-    AI_REVIEW_FALLBACK_ENDPOINT: env.AI_REVIEW_FALLBACK_ENDPOINT,
-    AI_REVIEW_FALLBACK_API_KEY: env.AI_REVIEW_FALLBACK_API_KEY,
-    AI_REVIEW_FALLBACK_MODEL: env.AI_REVIEW_FALLBACK_MODEL,
-    AI_REVIEW_FALLBACK_RESPONSE_FORMAT: env.AI_REVIEW_FALLBACK_RESPONSE_FORMAT,
-  };
 }
 
 function overviewSvgResponse(svg: string, status: string, method: string) {

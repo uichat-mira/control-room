@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
-      ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+      AI_REVIEW_GATEWAY_TOKEN: ${{ secrets.AI_REVIEW_GATEWAY_TOKEN }}
       AI_REVIEW_HEALTH_URL: https://control.mira.tomz.io/api/v1/ai-review/health
       AI_REVIEW_EXECUTION_URL: https://control.mira.tomz.io/api/v1/ai-review/review
     steps:
@@ -60,7 +60,7 @@ jobs:
             throw new Error(`GitHub read credential is not configured: ${health.github}`);
           }
           if (health.callerAuth !== 'configured') {
-            throw new Error(`Shared Organization caller auth is not configured: ${health.callerAuth}`);
+            throw new Error(`Purpose-specific AI Review caller auth is not configured: ${health.callerAuth}`);
           }
           if (!health.policyRef) throw new Error('Organization policy ref is missing');
           if (!health.providerSlots || !validSlotStates.has(health.providerSlots.primary) || !validSlotStates.has(health.providerSlots.fallback)) {
@@ -77,8 +77,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "${ORG_GITHUB_TOKEN:-}" ]; then
-            echo '::error::ORG_GITHUB_TOKEN is unavailable to AI Review smoke.'
+          if [ -z "${AI_REVIEW_GATEWAY_TOKEN:-}" ]; then
+            echo '::error::AI_REVIEW_GATEWAY_TOKEN is unavailable to AI Review smoke.'
             exit 1
           fi
 
@@ -99,7 +99,7 @@ jobs:
           status="$(curl --silent --show-error \
             --retry 3 --retry-delay 2 --retry-all-errors \
             -H 'Content-Type: application/json' \
-            -H "Authorization: Bearer ${ORG_GITHUB_TOKEN}" \
+            -H "Authorization: Bearer ${AI_REVIEW_GATEWAY_TOKEN}" \
             --data "$payload" \
             --output /tmp/ai-review-execution.json \
             --write-out '%{http_code}' \
