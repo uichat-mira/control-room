@@ -24,7 +24,7 @@ function contentResponse(path: string, sha: string, content: string) {
   });
 }
 
-test("builds one immutable typed package from trusted GitHub sources", async (t) => {
+test("builds one immutable typed CODE_REVIEW package from trusted GitHub sources", async (t) => {
   const originalFetch = globalThis.fetch;
   const requested: string[] = [];
 
@@ -89,6 +89,7 @@ test("builds one immutable typed package from trusted GitHub sources", async (t)
     108,
   );
 
+  assert.equal(pkg.reviewMode, "CODE_REVIEW");
   assert.equal(pkg.pullRequest.base.sha, BASE_SHA);
   assert.equal(pkg.pullRequest.head.sha, HEAD_SHA);
   assert.equal(pkg.controls.identity.policyCommitSha, POLICY_COMMIT);
@@ -96,12 +97,25 @@ test("builds one immutable typed package from trusted GitHub sources", async (t)
   assert.equal(pkg.controls.identity.outputContractBlobSha, OUTPUT_BLOB);
   assert.equal(pkg.controls.identity.profileBlobSha, null);
   assert.equal(pkg.controls.identity.rootContractBlobSha, ROOT_BLOB);
+  assert.deepEqual(pkg.controls.identity.taskContract, {
+    state: "unavailable",
+    reason: "trusted_lookup_not_configured",
+  });
   assert.equal(pkg.trust.organizationControlsSource, `uichat-mira/.github@${POLICY_COMMIT}`);
   assert.equal(pkg.trust.repositoryControlsSource, `uichat-mira/mira-mobile@${BASE_SHA}`);
   assert.equal(pkg.diff.source, `${BASE_SHA}...${HEAD_SHA}`);
   assert.equal(pkg.diff.truncated, false);
   assert.deepEqual(pkg.gaps, [
-    "Missing .ai/review-profile.md at base SHA; repository-specific review rules are not yet migrated.",
+    {
+      code: "missing_repository_profile",
+      message: "Missing .ai/review-profile.md at base SHA; repository-specific review rules are not yet migrated.",
+      material: true,
+    },
+    {
+      code: "trusted_task_contract_unavailable",
+      message: "Trusted Task / PR Contract lookup is not configured; highest-priority task instructions may be unavailable to the reviewer.",
+      material: true,
+    },
   ]);
   assert.equal(requested.length, 7);
 });
