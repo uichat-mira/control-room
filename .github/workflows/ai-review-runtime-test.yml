@@ -5,7 +5,9 @@ on:
     branches:
       - prod
     paths:
+      - 'src/gateway.ts'
       - 'src/ai-review.ts'
+      - 'src/ai-review-execution.ts'
       - 'src/ai-review-package.ts'
       - 'src/ai-review-prompt.ts'
       - 'src/ai-review-provider-*.ts'
@@ -18,7 +20,9 @@ on:
     branches:
       - prod
     paths:
+      - 'src/gateway.ts'
       - 'src/ai-review.ts'
+      - 'src/ai-review-execution.ts'
       - 'src/ai-review-package.ts'
       - 'src/ai-review-prompt.ts'
       - 'src/ai-review-provider-*.ts'
