@@ -1,5 +1,10 @@
 import { handleAiReviewRequest, type AiReviewEnv } from "./ai-review";
+import {
+  renderGitHubOverviewSvg,
+  renderGitHubOverviewUnavailableSvg,
+} from "./github-overview";
 import { handleMcpRequest } from "./mcp";
+import type { OrganizationSnapshot } from "./shared";
 import app from "./worker";
 
 type BaseEnv = Parameters<typeof app.fetch>[1];
@@ -123,15 +128,74 @@ function sharedAiReviewEnv(env: Env): AiReviewEnv {
   };
 }
 
+function overviewSvgResponse(svg: string, status: string, method: string) {
+  return new Response(method === "HEAD" ? null : svg, {
+    status: 200,
+    headers: {
+      "content-type": "image/svg+xml; charset=utf-8",
+      "cache-control": "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "x-mira-snapshot-status": status,
+    },
+  });
+}
+
+async function handleGitHubOverviewRequest(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: { allow: "GET, HEAD" },
+    });
+  }
+
+  try {
+    const summaryUrl = new URL("/api/v1/summary", request.url);
+    const summaryResponse = await app.fetch(
+      new Request(summaryUrl, {
+        method: "GET",
+        headers: { accept: "application/json" },
+      }),
+      env,
+    );
+
+    if (!summaryResponse.ok) {
+      throw new Error(`Summary returned ${summaryResponse.status}`);
+    }
+
+    const snapshot = (await summaryResponse.json()) as OrganizationSnapshot & {
+      apiVersion?: string;
+    };
+    return overviewSvgResponse(
+      renderGitHubOverviewSvg(snapshot),
+      snapshot.status,
+      request.method,
+    );
+  } catch {
+    return overviewSvgResponse(
+      renderGitHubOverviewUnavailableSvg(),
+      "unavailable",
+      request.method,
+    );
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url);
     const apiRoute = pathname.startsWith("/api/");
     const mcpRoute = pathname === "/mcp";
+    const embedRoute = pathname === "/embed/github-overview.svg";
     const aiReviewRoute = pathname.startsWith("/api/v1/ai-review/");
 
-    if (!apiRoute && !mcpRoute) {
+    if (!apiRoute && !mcpRoute && !embedRoute) {
       return app.fetch(request, env);
+    }
+
+    if (embedRoute) {
+      // GitHub may proxy this image through shared infrastructure, so keep the embed
+      // public, cacheable, and outside the per-client API rate-limit bucket.
+      return handleGitHubOverviewRequest(request, env);
     }
 
     if (mcpRoute) {
