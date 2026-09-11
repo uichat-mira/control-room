@@ -149,7 +149,7 @@ function overviewCacheKey(request: Request) {
 async function readOverviewCache(request: Request): Promise<Response | null> {
   try {
     const workerCaches = caches as CacheStorage & { default: Cache };
-    return await workerCaches.default.match(overviewCacheKey(request));
+    return (await workerCaches.default.match(overviewCacheKey(request))) ?? null;
   } catch {
     return null;
   }
