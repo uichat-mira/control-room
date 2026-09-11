@@ -1,4 +1,8 @@
-import type { OrganizationSnapshot, WorkflowConclusion } from "./shared";
+import type {
+  OrganizationSnapshot,
+  RepositoryWorkflow,
+  WorkflowConclusion,
+} from "./shared";
 
 const FAILURE_CONCLUSIONS = new Set<WorkflowConclusion>([
   "failure",
@@ -20,7 +24,7 @@ export interface GitHubOverviewStats {
 export function getGitHubOverviewStats(snapshot: OrganizationSnapshot): GitHubOverviewStats {
   const workflows = snapshot.repositories
     .map((repository) => repository.latestWorkflow)
-    .filter((workflow): workflow is NonNullable<typeof workflow> => workflow !== null);
+    .filter((workflow): workflow is RepositoryWorkflow => workflow !== null);
 
   return {
     repositories: snapshot.repositories.length,
@@ -97,5 +101,20 @@ export function renderGitHubOverviewSvg(snapshot: OrganizationSnapshot): string 
 
   <text x="28" y="196" fill="#8b949e" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12">${updatedLabel}</text>
   <text x="870" y="196" text-anchor="end" fill="#c15f3c" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="600">Open Control Room →</text>
+</svg>`;
+}
+
+export function renderGitHubOverviewUnavailableSvg(): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="160" viewBox="0 0 900 160" role="img" aria-labelledby="title desc">
+  <title id="title">Mira Control Room snapshot unavailable</title>
+  <desc id="desc">The Control Room could not produce its organization snapshot.</desc>
+  <rect width="900" height="160" rx="18" fill="#0d1117"/>
+  <rect x="0.5" y="0.5" width="899" height="159" rx="17.5" fill="none" stroke="#30363d"/>
+  <circle cx="38" cy="38" r="7" fill="#c15f3c"/>
+  <text x="58" y="45" fill="#f0f6fc" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="19" font-weight="700">Mira Control Room</text>
+  <text x="28" y="98" fill="#d29922" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="18" font-weight="700">Snapshot temporarily unavailable</text>
+  <text x="28" y="124" fill="#8b949e" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12">Open the Control Room for the current operational view.</text>
+  <text x="870" y="124" text-anchor="end" fill="#c15f3c" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="600">Open Control Room →</text>
 </svg>`;
 }
