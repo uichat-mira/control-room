@@ -4,6 +4,7 @@ import {
   ReviewPackageError,
   buildReviewPackageData,
   type AiReviewPackageEnv,
+  type ReviewPackage,
 } from "./ai-review-package.ts";
 import {
   REVIEW_EXECUTION_VERSION,
@@ -84,6 +85,16 @@ function packageErrorResponse(error: ReviewPackageError) {
   return json({ error: error.code, message: error.message }, { status: error.status });
 }
 
+function unexpectedPackageError(error: unknown) {
+  return json(
+    {
+      error: "review_package_failed",
+      message: error instanceof Error ? error.message : "Unknown review package failure",
+    },
+    { status: 502 },
+  );
+}
+
 function privateRouteOptions() {
   return new Response(null, {
     status: 204,
@@ -129,40 +140,43 @@ async function parseAuthorizedTarget(
   };
 }
 
+async function packageForTarget(
+  env: AiReviewEnv,
+  target: ReviewTarget,
+): Promise<ReviewPackage | Response> {
+  try {
+    return await buildReviewPackageData(env, target.repository, target.pullRequest);
+  } catch (error) {
+    if (error instanceof ReviewPackageError) return packageErrorResponse(error);
+    return unexpectedPackageError(error);
+  }
+}
+
 async function buildReviewPackageResponse(request: Request, env: AiReviewEnv) {
   const target = await parseAuthorizedTarget(request, env);
   if (target instanceof Response) return target;
 
-  try {
-    return json(await buildReviewPackageData(env, target.repository, target.pullRequest));
-  } catch (error) {
-    if (error instanceof ReviewPackageError) return packageErrorResponse(error);
-    return json(
-      {
-        error: "review_package_failed",
-        message: error instanceof Error ? error.message : "Unknown review package failure",
-      },
-      { status: 502 },
-    );
-  }
+  const pkg = await packageForTarget(env, target);
+  return pkg instanceof Response ? pkg : json(pkg);
 }
 
 async function executeReviewResponse(request: Request, env: AiReviewEnv) {
   const target = await parseAuthorizedTarget(request, env);
   if (target instanceof Response) return target;
 
+  const pkg = await packageForTarget(env, target);
+  if (pkg instanceof Response) return pkg;
+
   try {
-    const pkg = await buildReviewPackageData(env, target.repository, target.pullRequest);
     const result = await executeTrustedReviewPackage(env, pkg);
     return json(result, {
       status: result.execution.state === "COMPLETED" ? 200 : 503,
     });
-  } catch (error) {
-    if (error instanceof ReviewPackageError) return packageErrorResponse(error);
+  } catch {
     return json(
       {
         error: "review_execution_failed",
-        message: "AI Review execution failed before a normalized result was produced.",
+        message: "AI Review execution failed after the trusted package was built.",
       },
       { status: 502 },
     );
