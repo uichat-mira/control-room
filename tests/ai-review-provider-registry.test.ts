@@ -1,56 +1,88 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import {
+  PROVIDER_CATALOG,
+  REVIEW_ROUTING,
+  configuredProviderSecretRefs,
+  validateProviderConfiguration,
+} from "../src/ai-review-provider-config.ts";
 import { buildReviewProviderRegistry } from "../src/ai-review-provider-registry.ts";
 
-function basePrimaryEnv() {
-  return {
-    AI_REVIEW_PRIMARY_ID: "primary-test",
-    AI_REVIEW_PRIMARY_ENDPOINT: "https://provider.example/v1/chat/completions",
-    AI_REVIEW_PRIMARY_API_KEY: "secret",
-    AI_REVIEW_PRIMARY_MODEL: "review-model",
+test("catalog models provider accounts independently from review roles", () => {
+  assert.deepEqual(Object.keys(PROVIDER_CATALOG.providers).sort(), [
+    "minimax-cn-codeplan",
+    "opencode-go",
+    "volcengine-coding-plan",
+  ]);
+  assert.equal(
+    PROVIDER_CATALOG.providers["minimax-cn-codeplan"].credential.secretRef,
+    "AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY",
+  );
+  assert.equal(
+    PROVIDER_CATALOG.providers["opencode-go"].models["deepseek-v4-flash"].modelId,
+    "deepseek-v4-flash",
+  );
+  assert.equal(
+    PROVIDER_CATALOG.providers["opencode-go"].models["minimax-m3"].transport,
+    "anthropic-messages",
+  );
+});
+
+test("provider secret references are the only runtime configuration values", () => {
+  assert.deepEqual(configuredProviderSecretRefs().sort(), [
+    "AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY",
+    "AI_PROVIDER_OPENCODE_GO_KEY",
+    "AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY",
+  ]);
+});
+
+test("CODE_REVIEW uses MiniMax routine, cross-provider OpenCode fallback, and separate escalation", () => {
+  assert.deepEqual(REVIEW_ROUTING.routes.CODE_REVIEW, {
+    routine: { provider: "minimax-cn-codeplan", model: "m3" },
+    fallback: { provider: "opencode-go", model: "deepseek-v4-flash" },
+    escalation: { provider: "opencode-go", model: "deepseek-v4-pro" },
+  });
+});
+
+test("configured routine and fallback accounts instantiate from their own credentials", () => {
+  const registry = buildReviewProviderRegistry(
+    {
+      AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "minimax-secret",
+      AI_PROVIDER_OPENCODE_GO_KEY: "go-secret",
+    },
+    "CODE_REVIEW",
+  );
+
+  assert.equal(registry.route.routine.state, "configured");
+  assert.equal(registry.route.fallback?.state, "configured");
+  assert.equal(registry.providers.length, 2);
+  assert.equal(registry.providers[0].id, "minimax-cn-codeplan/m3");
+  assert.equal(registry.providers[1].id, "opencode-go/deepseek-v4-flash");
+});
+
+test("fallback routing must provide real provider-account redundancy", () => {
+  const routing = structuredClone(REVIEW_ROUTING);
+  routing.routes.CODE_REVIEW.fallback = {
+    provider: "minimax-cn-codeplan",
+    model: "m3",
   };
-}
 
-test("accepts explicit per-instance input and output budgets", () => {
-  const registry = buildReviewProviderRegistry({
-    ...basePrimaryEnv(),
-    AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS: "120000",
-    AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS: "4096",
-    AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER: "max_completion_tokens",
-  });
-
-  assert.equal(registry.slots.primary, "configured");
-  assert.equal(registry.providers.length, 1);
-  assert.equal(registry.providers[0]?.id, "primary-test");
+  assert.throws(
+    () => validateProviderConfiguration(PROVIDER_CATALOG, routing),
+    /fallback must use a different provider account than routine/,
+  );
 });
 
-test("rejects an output token budget without an explicit compatible parameter", () => {
-  const registry = buildReviewProviderRegistry({
-    ...basePrimaryEnv(),
-    AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS: "4096",
-  });
+test("rejects route targets that reference a model absent from the provider account", () => {
+  const routing = structuredClone(REVIEW_ROUTING);
+  routing.routes.CODE_REVIEW.routine = {
+    provider: "minimax-cn-codeplan",
+    model: "does-not-exist",
+  };
 
-  assert.equal(registry.slots.primary, "invalid");
-  assert.equal(registry.providers.length, 0);
-});
-
-test("rejects an output token parameter without a token budget", () => {
-  const registry = buildReviewProviderRegistry({
-    ...basePrimaryEnv(),
-    AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER: "max_tokens",
-  });
-
-  assert.equal(registry.slots.primary, "invalid");
-  assert.equal(registry.providers.length, 0);
-});
-
-test("rejects invalid provider input budget configuration", () => {
-  const registry = buildReviewProviderRegistry({
-    ...basePrimaryEnv(),
-    AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS: "not-a-number",
-  });
-
-  assert.equal(registry.slots.primary, "invalid");
-  assert.equal(registry.providers.length, 0);
+  assert.throws(
+    () => validateProviderConfiguration(PROVIDER_CATALOG, routing),
+    /references unknown model/,
+  );
 });
