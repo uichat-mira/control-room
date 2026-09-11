@@ -44,6 +44,7 @@ export interface ProviderModelConfig {
     openaiChat?: OpenAIChatDriverOptions;
   };
   reviewDefaults?: {
+    timeoutMs?: number;
     maxPromptCharacters?: number;
     maxOutputTokens?: number;
     outputTokenParameter?: OpenAICompatibleOutputTokenParameter;
@@ -88,6 +89,13 @@ function positiveInteger(value: number | undefined, label: string) {
   if (value === undefined) return;
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${label} must be a positive safe integer.`);
+  }
+}
+
+function validateTimeout(value: number | undefined, label: string) {
+  if (value === undefined) return;
+  if (!Number.isSafeInteger(value) || value < 1_000 || value > 300_000) {
+    throw new Error(`${label} must be an integer between 1000 and 300000 ms.`);
   }
 }
 
@@ -197,6 +205,10 @@ export function validateProviderConfiguration(
         throw new Error(`${providerId}/${modelKey} references unknown transport ${model.transport}.`);
       }
       validateOpenAIChatOptions(providerId, modelKey, model, transport);
+      validateTimeout(
+        model.reviewDefaults?.timeoutMs,
+        `${providerId}/${modelKey}.timeoutMs`,
+      );
       positiveInteger(
         model.reviewDefaults?.maxPromptCharacters,
         `${providerId}/${modelKey}.maxPromptCharacters`,
