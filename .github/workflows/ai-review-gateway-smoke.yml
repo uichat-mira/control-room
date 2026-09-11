@@ -20,11 +20,13 @@ jobs:
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    env:
+      ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+      AI_REVIEW_HEALTH_URL: https://control.mira.tomz.io/api/v1/ai-review/health
+      AI_REVIEW_EXECUTION_URL: https://control.mira.tomz.io/api/v1/ai-review/review
     steps:
       - name: Verify deployed AI Review Gateway health
         shell: bash
-        env:
-          AI_REVIEW_HEALTH_URL: https://control.mira.tomz.io/api/v1/ai-review/health
         run: |
           set -euo pipefail
 
@@ -36,6 +38,7 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const health = JSON.parse(fs.readFileSync('/tmp/ai-review-health.json', 'utf8'));
+          const validSlotStates = new Set(['unconfigured', 'configured', 'partial', 'invalid']);
 
           if (health.ok !== true) throw new Error('AI Review Gateway health is not ok');
           if (health.service !== 'mira-ai-review-gateway') {
@@ -47,7 +50,10 @@ jobs:
           if (health.packageVersion !== 'mira-ai-review-package/v0') {
             throw new Error(`Unexpected package version: ${health.packageVersion}`);
           }
-          if (health.mode !== 'trusted-package-only') {
+          if (health.executionVersion !== 'mira-ai-review-execution/v0') {
+            throw new Error(`Unexpected execution version: ${health.executionVersion}`);
+          }
+          if (health.mode !== 'review-execution-unpublished') {
             throw new Error(`Unexpected gateway mode: ${health.mode}`);
           }
           if (health.github !== 'configured') {
@@ -57,8 +63,73 @@ jobs:
             throw new Error(`Shared Organization caller auth is not configured: ${health.callerAuth}`);
           }
           if (!health.policyRef) throw new Error('Organization policy ref is missing');
+          if (!health.providerSlots || !validSlotStates.has(health.providerSlots.primary) || !validSlotStates.has(health.providerSlots.fallback)) {
+            throw new Error(`Invalid provider slot state: ${JSON.stringify(health.providerSlots)}`);
+          }
 
           console.log(
-            `AI Review Gateway smoke OK: runtime=${health.runtimeVersion}, package=${health.packageVersion}, github=${health.github}, callerAuth=${health.callerAuth}, policyRef=${health.policyRef}`,
+            `AI Review Gateway smoke OK: runtime=${health.runtimeVersion}, package=${health.packageVersion}, execution=${health.executionVersion}, mode=${health.mode}, github=${health.github}, callerAuth=${health.callerAuth}, primary=${health.providerSlots.primary}, fallback=${health.providerSlots.fallback}, policyRef=${health.policyRef}`,
+          );
+          NODE
+
+      - name: Verify explicit unavailable semantics when providers are unconfigured
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ORG_GITHUB_TOKEN:-}" ]; then
+            echo '::error::ORG_GITHUB_TOKEN is unavailable to AI Review smoke.'
+            exit 1
+          fi
+
+          if ! node <<'NODE'
+          const fs = require('node:fs');
+          const health = JSON.parse(fs.readFileSync('/tmp/ai-review-health.json', 'utf8'));
+          process.exit(
+            health.providerSlots?.primary === 'unconfigured' &&
+            health.providerSlots?.fallback === 'unconfigured' ? 0 : 1
+          );
+          NODE
+          then
+            echo 'Provider slot is configured/partial/invalid; skipping no-provider execution smoke to avoid a model call.'
+            exit 0
+          fi
+
+          payload='{"repository":"uichat-mira/mira-mobile","pullRequest":108}'
+          status="$(curl --silent --show-error \
+            --retry 3 --retry-delay 2 --retry-all-errors \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer ${ORG_GITHUB_TOKEN}" \
+            --data "$payload" \
+            --output /tmp/ai-review-execution.json \
+            --write-out '%{http_code}' \
+            "$AI_REVIEW_EXECUTION_URL")"
+
+          if [ "$status" != '503' ]; then
+            echo "::error::Expected no-provider review execution to return HTTP 503, got ${status}."
+            cat /tmp/ai-review-execution.json || true
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const result = JSON.parse(fs.readFileSync('/tmp/ai-review-execution.json', 'utf8'));
+          if (result.executionVersion !== 'mira-ai-review-execution/v0') {
+            throw new Error(`Unexpected executionVersion: ${result.executionVersion}`);
+          }
+          if (result.identity?.repository !== 'uichat-mira/mira-mobile' || result.identity?.pullRequest !== 108) {
+            throw new Error(`Unexpected review identity: ${JSON.stringify(result.identity)}`);
+          }
+          if (result.execution?.state !== 'REVIEW_UNAVAILABLE') {
+            throw new Error(`Expected REVIEW_UNAVAILABLE, got ${result.execution?.state}`);
+          }
+          if (result.execution?.reason !== 'no_eligible_provider') {
+            throw new Error(`Expected no_eligible_provider, got ${result.execution?.reason}`);
+          }
+          if (!Array.isArray(result.execution?.attempts) || result.execution.attempts.length !== 0) {
+            throw new Error('No-provider execution must not contain provider attempts');
+          }
+          console.log(
+            `AI Review no-provider smoke OK: repo=${result.identity.repository}#${result.identity.pullRequest}, head=${result.identity.headSha}, state=${result.execution.state}, reason=${result.execution.reason}`,
           );
           NODE
