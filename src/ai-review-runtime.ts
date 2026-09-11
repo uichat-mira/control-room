@@ -17,6 +17,7 @@ export type ReviewFailureClass =
   | "provider_unavailable"
   | "provider_auth"
   | "malformed_response"
+  | "input_limit"
   | "unknown";
 
 export interface ReviewFinding {
