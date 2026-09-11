@@ -75,7 +75,6 @@ function sameTaskContract(
     return (
       left.repository === right.repository &&
       left.issue === right.issue &&
-      left.updatedAt === right.updatedAt &&
       left.contentSha256 === right.contentSha256
     );
   }
