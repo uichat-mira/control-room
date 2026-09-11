@@ -18,6 +18,9 @@ on:
       - 'package.json'
       - 'tsconfig.json'
       - '.github/workflows/ai-review-runtime-test.yml'
+      - '.github/workflows/ai-review-package-probe.yml'
+      - '.github/workflows/ai-review-gateway-smoke.yml'
+      - '.github/workflows/deploy.yml'
   push:
     branches:
       - prod
@@ -35,6 +38,9 @@ on:
       - 'package.json'
       - 'tsconfig.json'
       - '.github/workflows/ai-review-runtime-test.yml'
+      - '.github/workflows/ai-review-package-probe.yml'
+      - '.github/workflows/ai-review-gateway-smoke.yml'
+      - '.github/workflows/deploy.yml'
 
 permissions:
   contents: read
