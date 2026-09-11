@@ -19,6 +19,7 @@ function reviewPackage(): ReviewPackage {
     packageVersion: "mira-ai-review-package/v0",
     runtimeVersion: "control-room-ai-review/v0",
     generatedAt: "2026-09-11T00:00:00.000Z",
+    reviewMode: "CODE_REVIEW",
     trust: {
       headIsUntrusted: true,
       executesPullRequestCode: false,
@@ -61,6 +62,10 @@ function reviewPackage(): ReviewPackage {
         outputContractBlobSha: "5555555555555555555555555555555555555555",
         profileBlobSha: null,
         rootContractBlobSha: null,
+        taskContract: {
+          state: "unavailable",
+          reason: "trusted_lookup_not_configured",
+        },
       },
     },
     diff: {
@@ -71,7 +76,13 @@ function reviewPackage(): ReviewPackage {
       truncated: false,
       limitChars: 180000,
     },
-    gaps: ["Deterministic package gap."],
+    gaps: [
+      {
+        code: "missing_repository_profile",
+        message: "Deterministic package gap.",
+        material: true,
+      },
+    ],
   };
 }
 
@@ -84,6 +95,7 @@ function completedEnvelope(
     identity: {
       repository: "uichat-mira/example",
       pullRequest: 7,
+      reviewMode: "CODE_REVIEW",
       baseSha: "1111111111111111111111111111111111111111",
       headSha: "2222222222222222222222222222222222222222",
       policyCommitSha: "3333333333333333333333333333333333333333",
@@ -91,6 +103,10 @@ function completedEnvelope(
       outputContractBlobSha: "5555555555555555555555555555555555555555",
       profileBlobSha: null,
       rootContractBlobSha: null,
+      taskContract: {
+        state: "unavailable",
+        reason: "trusted_lookup_not_configured",
+      },
     },
     providerSlots: { primary: "configured", fallback: "unconfigured" },
     execution: {
@@ -130,6 +146,9 @@ test("renders the Organization marker exactly once with every required logical s
   assert.match(body, /### Validation gaps/);
   assert.match(body, /None identified\./);
   assert.match(body, /### Review metadata/);
+  assert.match(body, /CODE_REVIEW/);
+  assert.match(body, /Trusted Task \/ PR contract/);
+  assert.match(body, /trusted_lookup_not_configured/);
   assert.match(body, /primary-test/);
   assert.match(body, /review-model/);
   assert.match(body, /mira-ai-review-output\/v1/);
@@ -266,19 +285,55 @@ test("treats an unchanged package identity as CURRENT", () => {
   });
 });
 
-test("marks changed PR or trusted-control identity as STALE_REVIEW", () => {
+test("does not stale a review when only the source policy commit changes", () => {
+  const current = reviewPackage();
+  current.controls.identity.policyCommitSha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  assert.deepEqual(compareReviewFreshness(completedEnvelope(), current), {
+    state: "CURRENT",
+    reasons: [],
+  });
+});
+
+test("marks changed PR or actual trusted-control content as STALE_REVIEW", () => {
   const current = reviewPackage();
   current.pullRequest.head.sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-  current.controls.identity.policyCommitSha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  current.controls.identity.policyBlobSha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   current.controls.identity.profileBlobSha = "cccccccccccccccccccccccccccccccccccccccc";
 
   assert.deepEqual(compareReviewFreshness(completedEnvelope(), current), {
     state: "STALE_REVIEW",
-    reasons: ["head_sha", "policy_commit", "profile_blob"],
+    reasons: ["head_sha", "policy_blob", "profile_blob"],
   });
 });
 
-test("runtime always preserves deterministic package gaps even when provider omits them", async (t) => {
+test("marks review mode changes as STALE_REVIEW", () => {
+  const current = reviewPackage();
+  current.reviewMode = "PROMOTION_REVIEW";
+
+  assert.deepEqual(compareReviewFreshness(completedEnvelope(), current), {
+    state: "STALE_REVIEW",
+    reasons: ["review_mode"],
+  });
+});
+
+test("marks trusted Task / PR Contract identity changes as STALE_REVIEW", () => {
+  const current = reviewPackage();
+  current.controls.identity.taskContract = {
+    state: "resolved",
+    repository: "uichat-mira/example",
+    issue: 42,
+    updatedAt: "2026-09-11T06:10:00.000Z",
+    contentSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  };
+
+  assert.deepEqual(compareReviewFreshness(completedEnvelope(), current), {
+    state: "STALE_REVIEW",
+    reasons: ["task_contract"],
+  });
+});
+
+test("runtime preserves deterministic gaps and promotes an invalid clean verdict", async (t) => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
     Response.json({
@@ -309,6 +364,12 @@ test("runtime always preserves deterministic package gaps even when provider omi
   );
 
   assert.equal(result.execution.state, "COMPLETED");
+  assert.equal(result.execution.review.verdict, "HUMAN_CHECK_NEEDED");
   assert.deepEqual(result.execution.review.validationGaps, ["Deterministic package gap."]);
+  assert.equal(result.identity.reviewMode, "CODE_REVIEW");
+  assert.deepEqual(result.identity.taskContract, {
+    state: "unavailable",
+    reason: "trusted_lookup_not_configured",
+  });
   assert.match(result.executedAt, /^\d{4}-\d{2}-\d{2}T/);
 });
