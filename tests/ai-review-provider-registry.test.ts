@@ -20,6 +20,10 @@ test("catalog models provider accounts independently from review roles", () => {
     "AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY",
   );
   assert.equal(
+    PROVIDER_CATALOG.providers["minimax-cn-codeplan"].models.m3.reviewDefaults?.timeoutMs,
+    300_000,
+  );
+  assert.equal(
     PROVIDER_CATALOG.providers["opencode-go"].models["deepseek-v4-flash"].modelId,
     "deepseek-v4-flash",
   );
@@ -59,6 +63,16 @@ test("configured routine and fallback accounts instantiate from their own creden
   assert.equal(registry.providers.length, 2);
   assert.equal(registry.providers[0].id, "minimax-cn-codeplan/m3");
   assert.equal(registry.providers[1].id, "opencode-go/deepseek-v4-flash");
+});
+
+test("provider review timeout is bounded by the adapter contract", () => {
+  const catalog = structuredClone(PROVIDER_CATALOG);
+  catalog.providers["minimax-cn-codeplan"].models.m3.reviewDefaults!.timeoutMs = 300_001;
+
+  assert.throws(
+    () => validateProviderConfiguration(catalog, REVIEW_ROUTING),
+    /timeoutMs must be an integer between 1000 and 300000 ms/,
+  );
 });
 
 test("fallback routing must provide real provider-account redundancy", () => {
