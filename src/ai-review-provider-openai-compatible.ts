@@ -3,6 +3,7 @@ import { buildReviewPrompt } from "./ai-review-prompt.ts";
 import {
   ReviewProviderError,
   failureClassForHttpStatus,
+  type ReviewFailureDetail,
   type ReviewProvider,
   type ReviewProviderResponse,
   type ReviewProviderRole,
@@ -152,6 +153,17 @@ function usageFromResponse(value: ChatCompletionsResponse["usage"]): ReviewProvi
   };
 }
 
+function malformed(
+  message: string,
+  failureDetail: ReviewFailureDetail,
+  usage?: ReviewProviderUsage,
+) {
+  return new ReviewProviderError(message, "malformed_response", {
+    failureDetail,
+    ...(usage ? { usage } : {}),
+  });
+}
+
 async function readBoundedResponseText(response: Response) {
   const contentLength = response.headers.get("content-length");
   const declaredLength = contentLength === null ? undefined : Number(contentLength);
@@ -160,9 +172,9 @@ async function readBoundedResponseText(response: Response) {
     Number.isFinite(declaredLength) &&
     declaredLength > MAX_PROVIDER_RESPONSE_BYTES
   ) {
-    throw new ReviewProviderError(
+    throw malformed(
       "Provider response exceeded the review output limit.",
-      "malformed_response",
+      "response_too_large",
     );
   }
 
@@ -184,9 +196,9 @@ async function readBoundedResponseText(response: Response) {
         } catch {
           // The bounded-output failure remains authoritative even if cancellation fails.
         }
-        throw new ReviewProviderError(
+        throw malformed(
           "Provider response exceeded the review output limit.",
-          "malformed_response",
+          "response_too_large",
         );
       }
       text += decoder.decode(value, { stream: true });
@@ -207,11 +219,22 @@ async function readBoundedResponseText(response: Response) {
   }
 }
 
-function parseProviderJson(content: string) {
+function reviewJsonFailureDetail(content: string): ReviewFailureDetail {
+  const trimmed = content.trimStart();
+  if (trimmed.startsWith("```")) return "review_json_fenced";
+  if (!trimmed.startsWith("{")) return "non_json_review_text";
+  return "invalid_review_json";
+}
+
+function parseProviderJson(content: string, usage?: ReviewProviderUsage) {
   try {
     return JSON.parse(content) as unknown;
   } catch {
-    throw new ReviewProviderError("Provider returned invalid JSON review output.", "malformed_response");
+    throw malformed(
+      "Provider returned invalid JSON review output.",
+      reviewJsonFailureDetail(content),
+      usage,
+    );
   }
 }
 
@@ -306,23 +329,24 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
         payload = JSON.parse(await readBoundedResponseText(response)) as ChatCompletionsResponse;
       } catch (error) {
         if (error instanceof ReviewProviderError) throw error;
-        throw new ReviewProviderError(
+        throw malformed(
           "Provider returned a non-JSON Chat Completions response.",
-          "malformed_response",
-        );
-      }
-
-      const content = payload.choices?.[0]?.message?.content;
-      if (typeof content !== "string" || !content.trim()) {
-        throw new ReviewProviderError(
-          "Provider response did not contain text review output.",
-          "malformed_response",
+          "invalid_chat_response",
         );
       }
 
       const usage = usageFromResponse(payload.usage);
+      const content = payload.choices?.[0]?.message?.content;
+      if (typeof content !== "string" || !content.trim()) {
+        throw malformed(
+          "Provider response did not contain text review output.",
+          "missing_message_content",
+          usage,
+        );
+      }
+
       return {
-        output: parseProviderJson(content),
+        output: parseProviderJson(content, usage),
         ...(usage ? { usage } : {}),
       };
     } finally {
