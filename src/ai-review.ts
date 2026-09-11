@@ -4,10 +4,23 @@ import {
   ReviewPackageError,
   buildReviewPackageData,
   type AiReviewPackageEnv,
-} from "./ai-review-package";
+} from "./ai-review-package.ts";
+import {
+  REVIEW_EXECUTION_VERSION,
+  executeTrustedReviewPackage,
+} from "./ai-review-execution.ts";
+import {
+  buildReviewProviderRegistry,
+  type AiReviewProviderEnv,
+} from "./ai-review-provider-registry.ts";
 
-export interface AiReviewEnv extends AiReviewPackageEnv {
+export interface AiReviewEnv extends AiReviewPackageEnv, AiReviewProviderEnv {
   AI_REVIEW_GATEWAY_TOKEN?: string;
+}
+
+interface ReviewTarget {
+  repository: string;
+  pullRequest: number;
 }
 
 function json(body: unknown, init: ResponseInit = {}) {
@@ -49,15 +62,18 @@ async function authorized(request: Request, env: AiReviewEnv) {
 }
 
 function health(env: AiReviewEnv) {
+  const providerSlots = buildReviewProviderRegistry(env).slots;
   return {
     ok: true,
     service: "mira-ai-review-gateway",
     runtimeVersion: AI_REVIEW_RUNTIME_VERSION,
     packageVersion: REVIEW_PACKAGE_VERSION,
-    mode: "trusted-package-only",
+    executionVersion: REVIEW_EXECUTION_VERSION,
+    mode: "review-execution-unpublished",
     github: env.GITHUB_READ_TOKEN ? "configured" : "unconfigured",
     callerAuth: env.AI_REVIEW_GATEWAY_TOKEN ? "configured" : "unconfigured",
     policyRef: env.AI_REVIEW_POLICY_REF?.trim() || "main",
+    providerSlots,
   };
 }
 
@@ -68,13 +84,28 @@ function packageErrorResponse(error: ReviewPackageError) {
   return json({ error: error.code, message: error.message }, { status: error.status });
 }
 
-async function buildReviewPackageResponse(request: Request, env: AiReviewEnv) {
+function privateRouteOptions() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      allow: "POST, OPTIONS",
+      "access-control-allow-methods": "POST, OPTIONS",
+      "access-control-allow-headers": "Authorization, Content-Type",
+      "access-control-max-age": "86400",
+    },
+  });
+}
+
+async function parseAuthorizedTarget(
+  request: Request,
+  env: AiReviewEnv,
+): Promise<ReviewTarget | Response> {
   const auth = await authorized(request, env);
   if (auth === "unconfigured") {
     return json(
       {
         error: "gateway_auth_unconfigured",
-        message: "AI_REVIEW_GATEWAY_TOKEN is required before review package requests are accepted.",
+        message: "AI Review caller authentication must be configured before private review requests are accepted.",
       },
       { status: 503 },
     );
@@ -89,20 +120,49 @@ async function buildReviewPackageResponse(request: Request, env: AiReviewEnv) {
   }
 
   const body = input as { repository?: unknown; pullRequest?: unknown };
-  const repository = typeof body.repository === "string" ? body.repository.trim() : "";
-  const pullRequest =
-    typeof body.pullRequest === "number" && Number.isInteger(body.pullRequest)
-      ? body.pullRequest
-      : NaN;
+  return {
+    repository: typeof body.repository === "string" ? body.repository.trim() : "",
+    pullRequest:
+      typeof body.pullRequest === "number" && Number.isInteger(body.pullRequest)
+        ? body.pullRequest
+        : NaN,
+  };
+}
+
+async function buildReviewPackageResponse(request: Request, env: AiReviewEnv) {
+  const target = await parseAuthorizedTarget(request, env);
+  if (target instanceof Response) return target;
 
   try {
-    return json(await buildReviewPackageData(env, repository, pullRequest));
+    return json(await buildReviewPackageData(env, target.repository, target.pullRequest));
   } catch (error) {
     if (error instanceof ReviewPackageError) return packageErrorResponse(error);
     return json(
       {
         error: "review_package_failed",
         message: error instanceof Error ? error.message : "Unknown review package failure",
+      },
+      { status: 502 },
+    );
+  }
+}
+
+async function executeReviewResponse(request: Request, env: AiReviewEnv) {
+  const target = await parseAuthorizedTarget(request, env);
+  if (target instanceof Response) return target;
+
+  try {
+    const pkg = await buildReviewPackageData(env, target.repository, target.pullRequest);
+    const result = await executeTrustedReviewPackage(env, pkg);
+    return json(result, {
+      status: result.execution.state === "COMPLETED" ? 200 : 503,
+    });
+  } catch (error) {
+    if (error instanceof ReviewPackageError) return packageErrorResponse(error);
+    return json(
+      {
+        error: "review_execution_failed",
+        message: "AI Review execution failed before a normalized result was produced.",
       },
       { status: 502 },
     );
@@ -119,25 +179,21 @@ export async function handleAiReviewRequest(request: Request, env: AiReviewEnv):
     return json(health(env));
   }
 
-  if (pathname === "/api/v1/ai-review/package") {
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          allow: "POST, OPTIONS",
-          "access-control-allow-methods": "POST, OPTIONS",
-          "access-control-allow-headers": "Authorization, Content-Type",
-          "access-control-max-age": "86400",
-        },
-      });
-    }
+  const privatePostRoute =
+    pathname === "/api/v1/ai-review/package" ||
+    pathname === "/api/v1/ai-review/review";
+
+  if (privatePostRoute) {
+    if (request.method === "OPTIONS") return privateRouteOptions();
     if (request.method !== "POST") {
       return json(
         { error: "method_not_allowed" },
         { status: 405, headers: { allow: "POST, OPTIONS" } },
       );
     }
-    return buildReviewPackageResponse(request, env);
+    return pathname === "/api/v1/ai-review/package"
+      ? buildReviewPackageResponse(request, env)
+      : executeReviewResponse(request, env);
   }
 
   return json({ error: "not_found" }, { status: 404 });
