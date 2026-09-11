@@ -14,7 +14,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       AI_REVIEW_GATEWAY_TOKEN: ${{ secrets.AI_REVIEW_GATEWAY_TOKEN }}
       AI_REVIEW_HEALTH_URL: https://control.mira.tomz.io/api/v1/ai-review/health
@@ -56,7 +56,6 @@ jobs:
 
           payload='{"repository":"uichat-mira/mira-mobile","pullRequest":108}'
           status="$(curl --silent --show-error \
-            --retry 1 --retry-delay 2 --retry-all-errors \
             -H 'Content-Type: application/json' \
             -H "Authorization: Bearer ${AI_REVIEW_GATEWAY_TOKEN}" \
             --data "$payload" \
