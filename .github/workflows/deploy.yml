@@ -50,6 +50,22 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
       AI_REVIEW_GATEWAY_TOKEN: ${{ secrets.AI_REVIEW_GATEWAY_TOKEN }}
+      AI_REVIEW_PRIMARY_ID: ${{ vars.AI_REVIEW_PRIMARY_ID }}
+      AI_REVIEW_PRIMARY_ENDPOINT: ${{ vars.AI_REVIEW_PRIMARY_ENDPOINT }}
+      AI_REVIEW_PRIMARY_API_KEY: ${{ secrets.AI_REVIEW_PRIMARY_API_KEY }}
+      AI_REVIEW_PRIMARY_MODEL: ${{ vars.AI_REVIEW_PRIMARY_MODEL }}
+      AI_REVIEW_PRIMARY_RESPONSE_FORMAT: ${{ vars.AI_REVIEW_PRIMARY_RESPONSE_FORMAT }}
+      AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS: ${{ vars.AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS }}
+      AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS: ${{ vars.AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS }}
+      AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER: ${{ vars.AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER }}
+      AI_REVIEW_FALLBACK_ID: ${{ vars.AI_REVIEW_FALLBACK_ID }}
+      AI_REVIEW_FALLBACK_ENDPOINT: ${{ vars.AI_REVIEW_FALLBACK_ENDPOINT }}
+      AI_REVIEW_FALLBACK_API_KEY: ${{ secrets.AI_REVIEW_FALLBACK_API_KEY }}
+      AI_REVIEW_FALLBACK_MODEL: ${{ vars.AI_REVIEW_FALLBACK_MODEL }}
+      AI_REVIEW_FALLBACK_RESPONSE_FORMAT: ${{ vars.AI_REVIEW_FALLBACK_RESPONSE_FORMAT }}
+      AI_REVIEW_FALLBACK_MAX_PROMPT_CHARACTERS: ${{ vars.AI_REVIEW_FALLBACK_MAX_PROMPT_CHARACTERS }}
+      AI_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS: ${{ vars.AI_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS }}
+      AI_REVIEW_FALLBACK_OUTPUT_TOKEN_PARAMETER: ${{ vars.AI_REVIEW_FALLBACK_OUTPUT_TOKEN_PARAMETER }}
       CONTROL_ROOM_URL: https://uichat-mira-control-room.dangjingtao.workers.dev
     steps:
       - name: Checkout
@@ -76,6 +92,22 @@ jobs:
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
           test -n "${AI_REVIEW_GATEWAY_TOKEN:-}"
+
+      - name: Validate AI Review provider slots
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const { buildReviewProviderRegistry } = await import('./src/ai-review-provider-registry.ts');
+          const { slots } = buildReviewProviderRegistry(process.env);
+          for (const [role, state] of Object.entries(slots)) {
+            if (state !== 'unconfigured' && state !== 'configured') {
+              console.error(`::error::AI Review ${role} provider slot is ${state}; refusing deployment.`);
+              process.exit(1);
+            }
+          }
+          console.log(`AI Review provider slots validated: primary=${slots.primary}, fallback=${slots.fallback}`);
+          NODE
 
       - name: Guard current prod head
         id: deploy_guard
@@ -112,6 +144,35 @@ jobs:
           if [ -n "${ORG_GITHUB_TOKEN:-}" ]; then
             printf 'GITHUB_READ_TOKEN=%s\n' "$ORG_GITHUB_TOKEN" >> /tmp/control-room-secrets.env
           fi
+
+          append_if_set() {
+            name="$1"
+            value="${!name:-}"
+            if [ -n "$value" ]; then
+              printf '%s=%s\n' "$name" "$value" >> /tmp/control-room-secrets.env
+            fi
+          }
+
+          for name in \
+            AI_REVIEW_PRIMARY_ID \
+            AI_REVIEW_PRIMARY_ENDPOINT \
+            AI_REVIEW_PRIMARY_API_KEY \
+            AI_REVIEW_PRIMARY_MODEL \
+            AI_REVIEW_PRIMARY_RESPONSE_FORMAT \
+            AI_REVIEW_PRIMARY_MAX_PROMPT_CHARACTERS \
+            AI_REVIEW_PRIMARY_MAX_OUTPUT_TOKENS \
+            AI_REVIEW_PRIMARY_OUTPUT_TOKEN_PARAMETER \
+            AI_REVIEW_FALLBACK_ID \
+            AI_REVIEW_FALLBACK_ENDPOINT \
+            AI_REVIEW_FALLBACK_API_KEY \
+            AI_REVIEW_FALLBACK_MODEL \
+            AI_REVIEW_FALLBACK_RESPONSE_FORMAT \
+            AI_REVIEW_FALLBACK_MAX_PROMPT_CHARACTERS \
+            AI_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS \
+            AI_REVIEW_FALLBACK_OUTPUT_TOKEN_PARAMETER
+          do
+            append_if_set "$name"
+          done
 
       - name: Deploy to Cloudflare
         if: steps.deploy_guard.outputs.deploy == 'true'
