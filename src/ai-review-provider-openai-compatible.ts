@@ -21,6 +21,9 @@ export interface OpenAICompatibleReviewProviderConfig {
   model: string;
   timeoutMs?: number;
   responseFormat?: "json_object" | "none";
+  requestExtensions?: {
+    reasoningSplit?: boolean;
+  };
   inputBudget?: {
     maxPromptCharacters: number;
   };
@@ -34,6 +37,7 @@ interface ChatCompletionsResponse {
   choices?: Array<{
     message?: {
       content?: unknown;
+      reasoning_details?: unknown;
     };
   }>;
   usage?: {
@@ -112,6 +116,18 @@ function normalizeOutputBudget(
   return {
     parameter: value.parameter,
     tokens: positiveInteger(value.tokens, "Provider max output tokens"),
+  };
+}
+
+function normalizeRequestExtensions(
+  value: OpenAICompatibleReviewProviderConfig["requestExtensions"],
+) {
+  if (!value) return undefined;
+  if (value.reasoningSplit !== undefined && typeof value.reasoningSplit !== "boolean") {
+    throw new Error("Provider reasoningSplit request extension must be boolean.");
+  }
+  return {
+    ...(value.reasoningSplit === true ? { reasoningSplit: true } : {}),
   };
 }
 
@@ -208,6 +224,7 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
   readonly #apiKey: string;
   readonly #timeoutMs: number;
   readonly #responseFormat: "json_object" | "none";
+  readonly #requestExtensions: { reasoningSplit?: true } | undefined;
   readonly #inputBudget: { maxPromptCharacters: number } | undefined;
   readonly #outputBudget:
     | { parameter: OpenAICompatibleOutputTokenParameter; tokens: number }
@@ -221,6 +238,7 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
     this.model = requireNonEmpty(config.model, "Provider model");
     this.#timeoutMs = normalizeTimeout(config.timeoutMs);
     this.#responseFormat = config.responseFormat ?? "json_object";
+    this.#requestExtensions = normalizeRequestExtensions(config.requestExtensions);
     this.#inputBudget = normalizeInputBudget(config.inputBudget);
     this.#outputBudget = normalizeOutputBudget(config.outputBudget);
   }
@@ -259,6 +277,9 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
             messages: prompt.messages,
             ...(this.#responseFormat === "json_object"
               ? { response_format: { type: "json_object" } }
+              : {}),
+            ...(this.#requestExtensions?.reasoningSplit === true
+              ? { reasoning_split: true }
               : {}),
             ...(this.#outputBudget
               ? { [this.#outputBudget.parameter]: this.#outputBudget.tokens }
