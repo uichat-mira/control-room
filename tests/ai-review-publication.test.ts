@@ -7,7 +7,7 @@ import {
   type ReviewExecutionEnvelope,
 } from "../src/ai-review-execution.ts";
 import {
-  MAX_REVIEW_COMMENT_CHARS,
+  MAX_REVIEW_COMMENT_BYTES,
   MIRA_REVIEW_MARKER,
   ReviewPublicationError,
   compareReviewFreshness,
@@ -234,12 +234,28 @@ test("fails closed instead of truncating an oversized normalized review comment"
   envelope.execution.review = {
     verdict: "HUMAN_CHECK_NEEDED",
     findings: [],
-    validationGaps: ["x".repeat(MAX_REVIEW_COMMENT_CHARS)],
+    validationGaps: ["x".repeat(MAX_REVIEW_COMMENT_BYTES)],
   };
 
   assert.throws(
     () => renderReviewComment(envelope),
-    /exceeds the 60000-character publication limit/,
+    /exceeds the 60000-byte publication limit/,
+  );
+});
+
+test("publication byte limit also protects multibyte Chinese output", () => {
+  const envelope = completedEnvelope();
+  if (envelope.execution.state !== "COMPLETED") throw new Error("fixture");
+  envelope.execution.review = {
+    verdict: "HUMAN_CHECK_NEEDED",
+    findings: [],
+    validationGaps: ["审".repeat(21_000)],
+  };
+
+  assert.ok(envelope.execution.review.validationGaps[0].length < MAX_REVIEW_COMMENT_BYTES);
+  assert.throws(
+    () => renderReviewComment(envelope),
+    /exceeds the 60000-byte publication limit/,
   );
 });
 
