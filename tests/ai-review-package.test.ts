@@ -111,6 +111,11 @@ test("builds one immutable typed CODE_REVIEW package from trusted GitHub sources
       message: "Missing .ai/review-profile.md at base SHA; repository-specific review rules are not yet migrated.",
       material: true,
     },
+    {
+      code: "trusted_task_contract_unavailable",
+      message: "Trusted Task / PR Contract lookup is not configured; highest-priority task instructions may be unavailable to the reviewer.",
+      material: true,
+    },
   ]);
   assert.equal(requested.length, 7);
 });
