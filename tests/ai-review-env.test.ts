@@ -27,6 +27,30 @@ test("does not fall back to the GitHub read token when caller auth is absent", (
   assert.equal(result.AI_REVIEW_GATEWAY_TOKEN, undefined);
 });
 
+test("forwards only modeled provider-account credentials into review runtime env", () => {
+  const source = {
+    AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "minimax-key",
+    AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY: "volcano-key",
+    AI_PROVIDER_OPENCODE_GO_KEY: "go-key",
+    AI_REVIEW_PRIMARY_API_KEY: "legacy-primary-key",
+    AI_REVIEW_FALLBACK_API_KEY: "legacy-fallback-key",
+  } as AiReviewEnv & {
+    AI_REVIEW_PRIMARY_API_KEY: string;
+    AI_REVIEW_FALLBACK_API_KEY: string;
+  };
+
+  const result = sharedAiReviewEnv(source) as AiReviewEnv & {
+    AI_REVIEW_PRIMARY_API_KEY?: string;
+    AI_REVIEW_FALLBACK_API_KEY?: string;
+  };
+
+  assert.equal(result.AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY, "minimax-key");
+  assert.equal(result.AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY, "volcano-key");
+  assert.equal(result.AI_PROVIDER_OPENCODE_GO_KEY, "go-key");
+  assert.equal("AI_REVIEW_PRIMARY_API_KEY" in result, false);
+  assert.equal("AI_REVIEW_FALLBACK_API_KEY" in result, false);
+});
+
 test("does not pass unrelated future GitHub write credentials into review runtime env", () => {
   const source = {
     GITHUB_READ_TOKEN: "github-read-token",
