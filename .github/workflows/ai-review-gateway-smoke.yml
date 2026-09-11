@@ -53,8 +53,8 @@ jobs:
           if (health.github !== 'configured') {
             throw new Error(`GitHub read credential is not configured: ${health.github}`);
           }
-          if (!['configured', 'unconfigured'].includes(health.callerAuth)) {
-            throw new Error(`Unexpected caller auth state: ${health.callerAuth}`);
+          if (health.callerAuth !== 'configured') {
+            throw new Error(`Shared Organization caller auth is not configured: ${health.callerAuth}`);
           }
           if (!health.policyRef) throw new Error('Organization policy ref is missing');
 

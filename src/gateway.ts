@@ -105,6 +105,14 @@ function validateMcpOrigin(request: Request): Response | null {
   return new Response("MCP origin is not allowed", { status: 403 });
 }
 
+function sharedAiReviewEnv(env: Env): AiReviewEnv {
+  return {
+    GITHUB_READ_TOKEN: env.GITHUB_READ_TOKEN,
+    AI_REVIEW_GATEWAY_TOKEN: env.GITHUB_READ_TOKEN,
+    AI_REVIEW_POLICY_REF: env.AI_REVIEW_POLICY_REF,
+  };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url);
@@ -122,7 +130,7 @@ export default {
     }
 
     if (request.method === "OPTIONS") {
-      if (aiReviewRoute) return handleAiReviewRequest(request, env);
+      if (aiReviewRoute) return handleAiReviewRequest(request, sharedAiReviewEnv(env));
       if (apiRoute) return app.fetch(request, env);
       return new Response(null, {
         status: 204,
@@ -149,7 +157,7 @@ export default {
     }
 
     const response = aiReviewRoute
-      ? await handleAiReviewRequest(request, env)
+      ? await handleAiReviewRequest(request, sharedAiReviewEnv(env))
       : mcpRoute
         ? await handleMcpRequest(request, env)
         : await app.fetch(request, env);
