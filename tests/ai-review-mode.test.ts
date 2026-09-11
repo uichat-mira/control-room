@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { Buffer } from "node:buffer";
 
 import {
@@ -67,7 +67,7 @@ function mockGitHub(headRef: string, baseRef: string) {
   };
 }
 
-async function expectMode(headRef: string, baseRef: string, expected: ReviewMode, t: test.TestContext) {
+async function expectMode(headRef: string, baseRef: string, expected: ReviewMode, t: TestContext) {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = mockGitHub(headRef, baseRef);
   t.after(() => {
