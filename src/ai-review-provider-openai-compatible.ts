@@ -132,7 +132,6 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
           body: JSON.stringify({
             model: this.model,
             messages: prompt.messages,
-            temperature: 0,
             ...(this.#responseFormat === "json_object"
               ? { response_format: { type: "json_object" } }
               : {}),
@@ -171,11 +170,10 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
         );
       }
 
+      const usage = usageFromResponse(payload.usage);
       return {
         output: parseProviderJson(content),
-        ...(usageFromResponse(payload.usage)
-          ? { usage: usageFromResponse(payload.usage) }
-          : {}),
+        ...(usage ? { usage } : {}),
       };
     } finally {
       clearTimeout(timeout);
