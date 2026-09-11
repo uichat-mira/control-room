@@ -30,7 +30,7 @@
           },
           "reviewDefaults": {
             "maxPromptCharacters": 250000,
-            "maxOutputTokens": 4096,
+            "maxOutputTokens": 16384,
             "outputTokenParameter": "max_completion_tokens"
           }
         }
