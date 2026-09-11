@@ -13,20 +13,25 @@ on:
         required: true
         default: '108'
         type: string
-  push:
-    branches:
-      - prod
-    paths:
-      - 'src/ai-review.ts'
-      - 'src/ai-review-package.ts'
-      - '.github/workflows/ai-review-package-probe.yml'
+  workflow_run:
+    workflows:
+      - Control Room CI / Deploy
+    types:
+      - completed
 
 permissions:
   contents: read
 
 jobs:
   probe:
-    if: ${{ github.event_name == 'push' || github.ref == 'refs/heads/prod' }}
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/prod') ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_branch == 'prod' &&
+         github.event.workflow_run.conclusion == 'success')
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
