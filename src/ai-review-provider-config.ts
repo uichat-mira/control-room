@@ -29,12 +29,19 @@ export interface ProviderTransportConfig {
   endpoint: string;
 }
 
+export interface OpenAIChatDriverOptions {
+  reasoningSplit?: boolean;
+}
+
 export interface ProviderModelConfig {
   modelId: string;
   transport: string;
   capabilities?: {
     reasoning?: ProviderReasoningMode;
     responseFormat?: ProviderResponseFormat;
+  };
+  driverOptions?: {
+    openaiChat?: OpenAIChatDriverOptions;
   };
   reviewDefaults?: {
     maxPromptCharacters?: number;
@@ -97,6 +104,37 @@ function validateEndpoint(value: string, label: string) {
   }
 }
 
+function validateOpenAIChatOptions(
+  providerId: string,
+  modelKey: string,
+  model: ProviderModelConfig,
+  transport: ProviderTransportConfig,
+) {
+  const options = model.driverOptions?.openaiChat;
+  if (!options) return;
+
+  if (transport.driver !== "openai-chat") {
+    throw new Error(
+      `${providerId}/${modelKey}.driverOptions.openaiChat requires the openai-chat driver.`,
+    );
+  }
+
+  if (
+    options.reasoningSplit !== undefined &&
+    typeof options.reasoningSplit !== "boolean"
+  ) {
+    throw new Error(
+      `${providerId}/${modelKey}.driverOptions.openaiChat.reasoningSplit must be boolean.`,
+    );
+  }
+
+  if (options.reasoningSplit === true && model.capabilities?.reasoning !== "separate") {
+    throw new Error(
+      `${providerId}/${modelKey} reasoningSplit=true requires capabilities.reasoning=separate.`,
+    );
+  }
+}
+
 function validateTarget(
   target: ReviewRouteTarget,
   label: string,
@@ -154,9 +192,11 @@ export function validateProviderConfiguration(
     for (const [modelKey, model] of Object.entries(provider.models)) {
       nonEmpty(modelKey, `${providerId}.model key`);
       nonEmpty(model.modelId, `${providerId}/${modelKey}.modelId`);
-      if (!provider.transports[model.transport]) {
+      const transport = provider.transports[model.transport];
+      if (!transport) {
         throw new Error(`${providerId}/${modelKey} references unknown transport ${model.transport}.`);
       }
+      validateOpenAIChatOptions(providerId, modelKey, model, transport);
       positiveInteger(
         model.reviewDefaults?.maxPromptCharacters,
         `${providerId}/${modelKey}.maxPromptCharacters`,
