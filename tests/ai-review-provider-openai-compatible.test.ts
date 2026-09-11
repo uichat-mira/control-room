@@ -249,6 +249,32 @@ test("classifies aborted provider fetches as timeout", async (t) => {
   );
 });
 
+test("classifies response-body aborts as timeout", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      new ReadableStream({
+        pull(controller) {
+          controller.error(new DOMException("aborted while reading", "AbortError"));
+        },
+      }),
+      { status: 200 },
+    );
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  await assert.rejects(
+    () => provider().review(reviewPackage()),
+    (error: unknown) => {
+      assert.ok(error instanceof ReviewProviderError);
+      assert.equal(error.failureClass, "timeout");
+      return true;
+    },
+  );
+});
+
 test("classifies generic fetch failures as provider unavailable", async (t) => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
@@ -265,6 +291,29 @@ test("classifies generic fetch failures as provider unavailable", async (t) => {
       assert.ok(error instanceof ReviewProviderError);
       assert.equal(error.failureClass, "provider_unavailable");
       assert.equal(error.message.includes("socket details"), false);
+      return true;
+    },
+  );
+});
+
+test("rejects oversized provider responses before parsing review output", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response("{}", {
+      status: 200,
+      headers: { "content-length": "512001" },
+    });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  await assert.rejects(
+    () => provider().review(reviewPackage()),
+    (error: unknown) => {
+      assert.ok(error instanceof ReviewProviderError);
+      assert.equal(error.failureClass, "malformed_response");
+      assert.match(error.message, /exceeded the review output limit/);
       return true;
     },
   );
@@ -293,5 +342,12 @@ test("rejects non-HTTPS provider endpoints at trusted configuration time", () =>
   assert.throws(
     () => provider({ endpoint: "http://provider.example/v1/chat/completions" }),
     /must use HTTPS/,
+  );
+});
+
+test("rejects provider endpoints with embedded credentials", () => {
+  assert.throws(
+    () => provider({ endpoint: "https://user:pass@provider.example/v1/chat/completions" }),
+    /must not contain embedded credentials/,
   );
 });
