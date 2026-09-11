@@ -76,6 +76,9 @@ function openAiProvider(
     apiKey,
     model: model.modelId,
     responseFormat: model.capabilities?.responseFormat ?? "none",
+    ...(model.reviewDefaults?.timeoutMs !== undefined
+      ? { timeoutMs: model.reviewDefaults.timeoutMs }
+      : {}),
     ...(model.driverOptions?.openaiChat?.reasoningSplit === true
       ? { requestExtensions: { reasoningSplit: true } }
       : {}),
