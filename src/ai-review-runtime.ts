@@ -69,7 +69,6 @@ export interface ProviderAttempt {
   status: "success" | "failed";
   latencyMs: number;
   failureClass?: ReviewFailureClass;
-  error?: string;
   usage?: ReviewProviderUsage;
 }
 
@@ -231,11 +230,6 @@ export function failureClassForHttpStatus(status: number): ReviewFailureClass {
   return "unknown";
 }
 
-function safeErrorMessage(error: unknown) {
-  if (error instanceof Error && error.message.trim()) return error.message.trim().slice(0, 500);
-  return "Unknown provider failure";
-}
-
 function classifyFailure(error: unknown): ReviewFailureClass {
   if (error instanceof ReviewProviderError) return error.failureClass;
   if (error instanceof ReviewNormalizationError) return "malformed_response";
@@ -291,7 +285,6 @@ export async function executeReviewWithFallback<Input>(
         status: "failed",
         latencyMs: Date.now() - startedAt,
         failureClass: classifyFailure(error),
-        error: safeErrorMessage(error),
       });
     }
   }
