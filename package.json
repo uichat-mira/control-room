@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "npm run build && vite preview",
     "typecheck": "tsc --noEmit",
+    "test:ai-review": "node --test tests/ai-review-runtime.test.ts",
     "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
