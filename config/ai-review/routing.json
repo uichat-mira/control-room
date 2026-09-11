@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "routes": {
+    "CODE_REVIEW": {
+      "routine": {
+        "provider": "minimax-cn-codeplan",
+        "model": "m3"
+      },
+      "fallback": {
+        "provider": "opencode-go",
+        "model": "deepseek-v4-flash"
+      },
+      "escalation": {
+        "provider": "opencode-go",
+        "model": "deepseek-v4-pro"
+      }
+    },
+    "PROMOTION_REVIEW": {
+      "routine": {
+        "provider": "minimax-cn-codeplan",
+        "model": "m3"
+      },
+      "fallback": {
+        "provider": "opencode-go",
+        "model": "deepseek-v4-flash"
+      },
+      "escalation": {
+        "provider": "opencode-go",
+        "model": "deepseek-v4-pro"
+      }
+    },
+    "RELEASE_REVIEW": {
+      "routine": {
+        "provider": "opencode-go",
+        "model": "deepseek-v4-pro"
+      },
+      "fallback": {
+        "provider": "minimax-cn-codeplan",
+        "model": "m3"
+      },
+      "escalation": {
+        "provider": "opencode-go",
+        "model": "glm-5.3"
+      }
+    }
+  }
+}
