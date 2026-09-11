@@ -1,0 +1,45 @@
+name: GitHub Overview Test
+
+on:
+  pull_request:
+    branches:
+      - prod
+    paths:
+      - "src/gateway.ts"
+      - "src/github-overview.ts"
+      - "tests/github-overview.test.ts"
+      - "wrangler.jsonc"
+      - "package.json"
+      - ".github/workflows/github-overview-test.yml"
+  push:
+    branches:
+      - prod
+    paths:
+      - "src/gateway.ts"
+      - "src/github-overview.ts"
+      - "tests/github-overview.test.ts"
+      - "wrangler.jsonc"
+      - "package.json"
+      - ".github/workflows/github-overview-test.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Test GitHub overview renderer
+        run: npm run test:github-overview

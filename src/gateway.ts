@@ -1,5 +1,10 @@
 import { handleAiReviewRequest, type AiReviewEnv } from "./ai-review";
+import {
+  renderGitHubOverviewSvg,
+  renderGitHubOverviewUnavailableSvg,
+} from "./github-overview";
 import { handleMcpRequest } from "./mcp";
+import type { OrganizationSnapshot } from "./shared";
 import app from "./worker";
 
 type BaseEnv = Parameters<typeof app.fetch>[1];
@@ -123,15 +128,115 @@ function sharedAiReviewEnv(env: Env): AiReviewEnv {
   };
 }
 
+function overviewSvgResponse(svg: string, status: string, method: string) {
+  return new Response(method === "HEAD" ? null : svg, {
+    status: 200,
+    headers: {
+      "content-type": "image/svg+xml; charset=utf-8",
+      "cache-control": "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "x-mira-snapshot-status": status,
+    },
+  });
+}
+
+function overviewCacheKey(request: Request) {
+  const url = new URL(request.url);
+  return new Request(`${url.origin}/embed/__github-overview-cache.svg`, { method: "GET" });
+}
+
+async function readOverviewCache(request: Request): Promise<Response | null> {
+  try {
+    const workerCaches = caches as CacheStorage & { default: Cache };
+    return (await workerCaches.default.match(overviewCacheKey(request))) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeOverviewCache(request: Request, response: Response) {
+  try {
+    const workerCaches = caches as CacheStorage & { default: Cache };
+    await workerCaches.default.put(overviewCacheKey(request), response.clone());
+  } catch {
+    // Cache is an optimization. The embed must remain available without it.
+  }
+}
+
+function headOnly(response: Response) {
+  return new Response(null, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+async function handleGitHubOverviewRequest(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: { allow: "GET, HEAD" },
+    });
+  }
+
+  const cached = await readOverviewCache(request);
+  if (cached) {
+    return request.method === "HEAD" ? headOnly(cached) : cached;
+  }
+
+  try {
+    const summaryUrl = new URL("/api/v1/summary", request.url);
+    const summaryResponse = await app.fetch(
+      new Request(summaryUrl, {
+        method: "GET",
+        headers: { accept: "application/json" },
+      }),
+      env,
+    );
+
+    if (!summaryResponse.ok) {
+      throw new Error(`Summary returned ${summaryResponse.status}`);
+    }
+
+    const snapshot = (await summaryResponse.json()) as OrganizationSnapshot & {
+      apiVersion?: string;
+    };
+    const response = overviewSvgResponse(
+      renderGitHubOverviewSvg(snapshot),
+      snapshot.status,
+      "GET",
+    );
+    await writeOverviewCache(request, response);
+    return request.method === "HEAD" ? headOnly(response) : response;
+  } catch {
+    const response = overviewSvgResponse(
+      renderGitHubOverviewUnavailableSvg(),
+      "unavailable",
+      "GET",
+    );
+    await writeOverviewCache(request, response);
+    return request.method === "HEAD" ? headOnly(response) : response;
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url);
     const apiRoute = pathname.startsWith("/api/");
     const mcpRoute = pathname === "/mcp";
+    const embedRoute = pathname === "/embed/github-overview.svg";
     const aiReviewRoute = pathname.startsWith("/api/v1/ai-review/");
 
-    if (!apiRoute && !mcpRoute) {
+    if (!apiRoute && !mcpRoute && !embedRoute) {
       return app.fetch(request, env);
+    }
+
+    if (embedRoute) {
+      // GitHub may proxy this image through shared infrastructure, so keep the embed
+      // public and outside the per-client API rate-limit bucket. A short edge cache
+      // prevents repeated organization/service probes from direct image requests.
+      return handleGitHubOverviewRequest(request, env);
     }
 
     if (mcpRoute) {
