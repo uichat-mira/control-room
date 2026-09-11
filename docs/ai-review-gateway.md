@@ -126,11 +126,17 @@ partial
 invalid
 ```
 
-Production deployment must accept only `unconfigured` or `configured`. A partial or invalid provider slot fails deployment before Worker mutation.
+Production deployment accepts only `unconfigured` or `configured`. A partial or invalid provider slot fails deployment before Worker mutation, and post-deploy smoke rejects either state if it somehow reaches production.
 
 ## Provider deployment configuration
 
-Provider API keys are GitHub Actions **Secrets**. Provider metadata/capability settings are GitHub Actions **Variables**. The deploy workflow transfers non-empty values into trusted Worker runtime secret bindings; values are never supplied by a PR request.
+GitHub Actions is the trusted configuration source for provider slots:
+
+- provider API keys are GitHub Actions **Secrets** and become encrypted Worker secrets;
+- provider metadata/capability settings are GitHub Actions **Variables** and become ordinary Worker vars through `wrangler deploy --var`;
+- provider values are never supplied by the PR request being reviewed.
+
+This split is intentional. Wrangler treats ordinary vars as deployment-owned configuration, while encrypted secrets have a separate lifecycle and are not removed merely because a later deploy omits them.
 
 ### Primary
 
@@ -186,6 +192,19 @@ max_completion_tokens
 ```
 
 The output budget is sent to the provider before generation. The existing Worker response-size bound remains a separate transport safety limit.
+
+### Disabling or changing a slot
+
+A slot must be changed as one complete configuration. Supplying only some required fields is `partial` and blocks deployment.
+
+To disable a slot, clear all of that slot's GitHub Variables and its API-key Secret. On the next production deployment:
+
+1. the deploy workflow validates the desired GitHub-side slot as `unconfigured`;
+2. if an old managed provider API-key secret still exists on the Worker, the workflow explicitly deletes that secret with Wrangler's bulk-secret deletion path;
+3. the normal Worker deploy omits the provider's plain vars, so Wrangler removes the old ordinary vars as part of its source-of-truth deployment behavior;
+4. post-deploy health must report only `unconfigured` or `configured`, never `partial` or `invalid`.
+
+This explicit reconciliation prevents a previously configured provider key from surviving as a hidden or "ghost" provider after the GitHub configuration has been cleared.
 
 ## Provider failure semantics
 
