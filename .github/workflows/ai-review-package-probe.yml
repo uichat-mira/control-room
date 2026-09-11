@@ -1,0 +1,122 @@
+name: AI Review Package Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Organization repository in owner/name form
+        required: true
+        default: uichat-mira/mira-mobile
+        type: string
+      pull_request:
+        description: Pull request number
+        required: true
+        default: '108'
+        type: string
+  push:
+    branches:
+      - prod
+    paths:
+      - '.github/workflows/ai-review-package-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: ${{ github.event_name == 'push' || github.ref == 'refs/heads/prod' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+      AI_REVIEW_PACKAGE_URL: https://control.mira.tomz.io/api/v1/ai-review/package
+      TARGET_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && inputs.repository || 'uichat-mira/mira-mobile' }}
+      TARGET_PULL_REQUEST: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request || '108' }}
+    steps:
+      - name: Probe trusted review package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ORG_GITHUB_TOKEN:-}" ]; then
+            echo '::error::ORG_GITHUB_TOKEN is unavailable to Control Room.'
+            exit 1
+          fi
+
+          if ! [[ "$TARGET_REPOSITORY" =~ ^uichat-mira/[A-Za-z0-9._-]+$ ]]; then
+            echo '::error::repository must be under uichat-mira.'
+            exit 1
+          fi
+
+          if ! [[ "$TARGET_PULL_REQUEST" =~ ^[1-9][0-9]*$ ]]; then
+            echo '::error::pull_request must be a positive integer.'
+            exit 1
+          fi
+
+          payload="$(jq -nc \
+            --arg repository "$TARGET_REPOSITORY" \
+            --argjson pullRequest "$TARGET_PULL_REQUEST" \
+            '{repository:$repository,pullRequest:$pullRequest}')"
+
+          curl --fail --silent --show-error \
+            --retry 3 --retry-delay 2 --retry-all-errors \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer ${ORG_GITHUB_TOKEN}" \
+            --data "$payload" \
+            "$AI_REVIEW_PACKAGE_URL" \
+            --output /tmp/ai-review-package.json
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('/tmp/ai-review-package.json', 'utf8'));
+          const repository = process.env.TARGET_REPOSITORY;
+          const pullRequest = Number(process.env.TARGET_PULL_REQUEST);
+
+          const assert = (condition, message) => {
+            if (!condition) throw new Error(message);
+          };
+          const sha40 = (value) => typeof value === 'string' && /^[0-9a-f]{40}$/i.test(value);
+
+          assert(pkg.packageVersion === 'mira-ai-review-package/v0', `Unexpected packageVersion: ${pkg.packageVersion}`);
+          assert(pkg.runtimeVersion === 'control-room-ai-review/v0', `Unexpected runtimeVersion: ${pkg.runtimeVersion}`);
+          assert(pkg.trust?.headIsUntrusted === true, 'Package must mark PR head as untrusted');
+          assert(pkg.trust?.executesPullRequestCode === false, 'Package must not execute PR code');
+          assert(pkg.pullRequest?.repository === repository, `Unexpected repository: ${pkg.pullRequest?.repository}`);
+          assert(pkg.pullRequest?.number === pullRequest, `Unexpected PR number: ${pkg.pullRequest?.number}`);
+
+          const baseSha = pkg.pullRequest?.base?.sha;
+          const headSha = pkg.pullRequest?.head?.sha;
+          const identity = pkg.controls?.identity;
+
+          assert(sha40(baseSha), `Invalid base SHA: ${baseSha}`);
+          assert(sha40(headSha), `Invalid head SHA: ${headSha}`);
+          assert(sha40(identity?.policyCommitSha), 'Missing immutable Organization policy commit SHA');
+          assert(sha40(identity?.policyBlobSha), 'Missing Organization policy blob SHA');
+          assert(sha40(identity?.outputContractBlobSha), 'Missing output-contract blob SHA');
+          assert(pkg.trust?.repositoryControlsSource === `${repository}@${baseSha}`, 'Repository controls are not bound to the PR base SHA');
+          assert(pkg.trust?.organizationControlsSource === `uichat-mira/.github@${identity.policyCommitSha}`, 'Organization controls are not bound to one immutable commit');
+          assert(pkg.diff?.source === `${baseSha}...${headSha}`, 'Diff identity does not match exact base/head SHAs');
+          assert(typeof pkg.diff?.content === 'string', 'Package diff content is missing');
+          assert(Array.isArray(pkg.gaps), 'Package gaps must be an array');
+
+          const summary = {
+            repository,
+            pullRequest,
+            baseSha,
+            headSha,
+            policyCommitSha: identity.policyCommitSha,
+            policyBlobSha: identity.policyBlobSha,
+            outputContractBlobSha: identity.outputContractBlobSha,
+            profileBlobSha: identity.profileBlobSha ?? null,
+            rootContractBlobSha: identity.rootContractBlobSha ?? null,
+            diff: {
+              chars: pkg.diff.chars,
+              originalChars: pkg.diff.originalChars,
+              truncated: pkg.diff.truncated,
+            },
+            gaps: pkg.gaps,
+          };
+
+          console.log('Authenticated AI Review package probe OK');
+          console.log(JSON.stringify(summary, null, 2));
+          NODE
