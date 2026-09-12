@@ -25,7 +25,7 @@ function reviewPackage(): ReviewPackage {
     pullRequest: {
       repository: "uichat-mira/example",
       number: 12,
-      title: "Reasoning split test",
+      title: "Thinking mode test",
       body: null,
       author: "tester",
       draft: false,
@@ -79,13 +79,68 @@ function reviewPackage(): ReviewPackage {
   };
 }
 
-test("MiniMax M3 models reasoning separation as an explicit openai-chat driver option", () => {
+function cleanResponse() {
+  return Response.json({
+    choices: [
+      {
+        message: {
+          content: '{"verdict":"NO_BLOCKING_FINDINGS","findings":[],"validationGaps":[]}',
+        },
+      },
+    ],
+    usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+  });
+}
+
+test("MiniMax M3 keeps reasoning capability but disables thinking for routine review", () => {
   const model = PROVIDER_CATALOG.providers["minimax-cn-codeplan"].models.m3;
   assert.equal(model.capabilities?.reasoning, "separate");
-  assert.equal(model.driverOptions?.openaiChat?.reasoningSplit, true);
+  assert.equal(model.driverOptions?.openaiChat?.thinking, "disabled");
+  assert.notEqual(model.driverOptions?.openaiChat?.reasoningSplit, true);
 });
 
-test("openai-chat reasoning split is sent explicitly and only content is parsed as review output", async (t) => {
+test("openai-chat sends thinking disabled explicitly for MiniMax M3", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let requestBody = "";
+
+  globalThis.fetch = async (_input, init) => {
+    requestBody = String(init?.body ?? "");
+    return cleanResponse();
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const provider = new OpenAICompatibleReviewProvider({
+    id: "minimax-cn-codeplan/m3",
+    role: "routine",
+    endpoint: "https://api.minimaxi.com/v1/chat/completions",
+    apiKey: "secret",
+    model: "MiniMax-M3",
+    responseFormat: "none",
+    requestExtensions: { thinking: "disabled" },
+    outputBudget: { parameter: "max_completion_tokens", tokens: 16384 },
+  });
+
+  const response = await provider.review(reviewPackage());
+  const body = JSON.parse(requestBody) as Record<string, unknown>;
+
+  assert.deepEqual(body.thinking, { type: "disabled" });
+  assert.equal("reasoning_split" in body, false);
+  assert.equal(body.max_completion_tokens, 16384);
+  assert.deepEqual(response.output, {
+    verdict: "NO_BLOCKING_FINDINGS",
+    findings: [],
+    validationGaps: [],
+  });
+  assert.deepEqual(response.usage, {
+    inputTokens: 120,
+    outputTokens: 30,
+    totalTokens: 150,
+  });
+});
+
+test("reasoning split remains available when a model explicitly opts in", async (t) => {
   const originalFetch = globalThis.fetch;
   let requestBody = "";
 
@@ -100,59 +155,36 @@ test("openai-chat reasoning split is sent explicitly and only content is parsed 
           },
         },
       ],
-      usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
     });
   };
-
   t.after(() => {
     globalThis.fetch = originalFetch;
   });
 
   const provider = new OpenAICompatibleReviewProvider({
-    id: "minimax-cn-codeplan/m3",
+    id: "reasoning-test",
     role: "routine",
-    endpoint: "https://api.minimaxi.com/v1/chat/completions",
+    endpoint: "https://provider.example/v1/chat/completions",
     apiKey: "secret",
-    model: "MiniMax-M3",
+    model: "reasoning-model",
     responseFormat: "none",
     requestExtensions: { reasoningSplit: true },
-    outputBudget: { parameter: "max_completion_tokens", tokens: 4096 },
   });
 
-  const response = await provider.review(reviewPackage());
+  await provider.review(reviewPackage());
   const body = JSON.parse(requestBody) as Record<string, unknown>;
-
   assert.equal(body.reasoning_split, true);
-  assert.equal(body.max_completion_tokens, 4096);
-  assert.deepEqual(response.output, {
-    verdict: "NO_BLOCKING_FINDINGS",
-    findings: [],
-    validationGaps: [],
-  });
-  assert.deepEqual(response.usage, {
-    inputTokens: 120,
-    outputTokens: 30,
-    totalTokens: 150,
-  });
+  assert.equal("thinking" in body, false);
 });
 
-test("generic openai-chat calls do not send reasoning_split unless the model opts in", async (t) => {
+test("generic openai-chat calls do not send thinking controls unless modeled", async (t) => {
   const originalFetch = globalThis.fetch;
   let requestBody = "";
 
   globalThis.fetch = async (_input, init) => {
     requestBody = String(init?.body ?? "");
-    return Response.json({
-      choices: [
-        {
-          message: {
-            content: '{"verdict":"NO_BLOCKING_FINDINGS","findings":[],"validationGaps":[]}',
-          },
-        },
-      ],
-    });
+    return cleanResponse();
   };
-
   t.after(() => {
     globalThis.fetch = originalFetch;
   });
@@ -168,11 +200,27 @@ test("generic openai-chat calls do not send reasoning_split unless the model opt
 
   await provider.review(reviewPackage());
   const body = JSON.parse(requestBody) as Record<string, unknown>;
+  assert.equal("thinking" in body, false);
   assert.equal("reasoning_split" in body, false);
+});
+
+test("rejects an unsupported openai-chat thinking mode", () => {
+  const catalog = structuredClone(PROVIDER_CATALOG);
+  const options = catalog.providers["minimax-cn-codeplan"].models.m3.driverOptions
+    ?.openaiChat as { thinking?: string };
+  options.thinking = "maximum";
+
+  assert.throws(
+    () => validateProviderConfiguration(catalog, REVIEW_ROUTING),
+    /thinking must be disabled, adaptive, or enabled/,
+  );
 });
 
 test("rejects reasoningSplit when semantic capability is not separate", () => {
   const catalog = structuredClone(PROVIDER_CATALOG);
+  catalog.providers["minimax-cn-codeplan"].models.m3.driverOptions = {
+    openaiChat: { reasoningSplit: true },
+  };
   catalog.providers["minimax-cn-codeplan"].models.m3.capabilities = {
     reasoning: "inline",
     responseFormat: "none",
@@ -184,14 +232,22 @@ test("rejects reasoningSplit when semantic capability is not separate", () => {
   );
 });
 
+test("rejects reasoningSplit combined with thinking disabled", () => {
+  const catalog = structuredClone(PROVIDER_CATALOG);
+  catalog.providers["minimax-cn-codeplan"].models.m3.driverOptions = {
+    openaiChat: { reasoningSplit: true, thinking: "disabled" },
+  };
+
+  assert.throws(
+    () => validateProviderConfiguration(catalog, REVIEW_ROUTING),
+    /reasoningSplit=true is incompatible with thinking=disabled/,
+  );
+});
+
 test("rejects openai-chat driver options on a non-openai transport", () => {
   const catalog = structuredClone(PROVIDER_CATALOG);
   catalog.providers["opencode-go"].models["minimax-m3"].driverOptions = {
-    openaiChat: { reasoningSplit: true },
-  };
-  catalog.providers["opencode-go"].models["minimax-m3"].capabilities = {
-    reasoning: "separate",
-    responseFormat: "none",
+    openaiChat: { thinking: "disabled" },
   };
 
   assert.throws(

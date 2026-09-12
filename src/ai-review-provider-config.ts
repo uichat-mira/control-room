@@ -18,6 +18,7 @@ export type ProviderReasoningMode =
 
 export type ProviderResponseFormat = "json_object" | "none";
 export type ReviewRouteRole = "routine" | "fallback" | "escalation";
+export type OpenAIChatThinkingMode = "disabled" | "adaptive" | "enabled";
 
 export interface ProviderCredentialConfig {
   type: "bearer";
@@ -31,6 +32,7 @@ export interface ProviderTransportConfig {
 
 export interface OpenAIChatDriverOptions {
   reasoningSplit?: boolean;
+  thinking?: OpenAIChatThinkingMode;
 }
 
 export interface ProviderModelConfig {
@@ -113,6 +115,12 @@ function validateEndpoint(value: string, label: string) {
   }
 }
 
+function validateOptionalBoolean(value: unknown, label: string) {
+  if (value !== undefined && typeof value !== "boolean") {
+    throw new Error(`${label} must be boolean.`);
+  }
+}
+
 function validateOpenAIChatOptions(
   providerId: string,
   modelKey: string,
@@ -128,18 +136,30 @@ function validateOpenAIChatOptions(
     );
   }
 
+  validateOptionalBoolean(
+    options.reasoningSplit,
+    `${providerId}/${modelKey}.driverOptions.openaiChat.reasoningSplit`,
+  );
+
   if (
-    options.reasoningSplit !== undefined &&
-    typeof options.reasoningSplit !== "boolean"
+    options.thinking !== undefined &&
+    options.thinking !== "disabled" &&
+    options.thinking !== "adaptive" &&
+    options.thinking !== "enabled"
   ) {
     throw new Error(
-      `${providerId}/${modelKey}.driverOptions.openaiChat.reasoningSplit must be boolean.`,
+      `${providerId}/${modelKey}.driverOptions.openaiChat.thinking must be disabled, adaptive, or enabled.`,
     );
   }
 
   if (options.reasoningSplit === true && model.capabilities?.reasoning !== "separate") {
     throw new Error(
       `${providerId}/${modelKey} reasoningSplit=true requires capabilities.reasoning=separate.`,
+    );
+  }
+  if (options.reasoningSplit === true && options.thinking === "disabled") {
+    throw new Error(
+      `${providerId}/${modelKey} reasoningSplit=true is incompatible with thinking=disabled.`,
     );
   }
 }

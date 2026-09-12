@@ -71,6 +71,14 @@ function openAiProvider(
   model: ProviderModelConfig,
   apiKey: string,
 ) {
+  const openAiOptions = model.driverOptions?.openaiChat;
+  const requestExtensions = openAiOptions
+    ? {
+        ...(openAiOptions.reasoningSplit === true ? { reasoningSplit: true as const } : {}),
+        ...(openAiOptions.thinking !== undefined ? { thinking: openAiOptions.thinking } : {}),
+      }
+    : undefined;
+
   return new OpenAICompatibleReviewProvider({
     id: `${target.provider}/${target.model}`,
     role,
@@ -81,8 +89,8 @@ function openAiProvider(
     ...(model.reviewDefaults?.timeoutMs !== undefined
       ? { timeoutMs: model.reviewDefaults.timeoutMs }
       : {}),
-    ...(model.driverOptions?.openaiChat?.reasoningSplit === true
-      ? { requestExtensions: { reasoningSplit: true } }
+    ...(requestExtensions && Object.keys(requestExtensions).length > 0
+      ? { requestExtensions }
       : {}),
     ...(model.reviewDefaults?.maxPromptCharacters !== undefined
       ? {
