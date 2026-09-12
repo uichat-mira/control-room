@@ -13,6 +13,7 @@ import {
 export type OpenAICompatibleOutputTokenParameter =
   | "max_tokens"
   | "max_completion_tokens";
+export type OpenAICompatibleThinkingMode = "disabled" | "adaptive" | "enabled";
 
 export interface OpenAICompatibleReviewProviderConfig {
   id: string;
@@ -24,6 +25,7 @@ export interface OpenAICompatibleReviewProviderConfig {
   responseFormat?: "json_object" | "none";
   requestExtensions?: {
     reasoningSplit?: boolean;
+    thinking?: OpenAICompatibleThinkingMode;
   };
   inputBudget?: {
     maxPromptCharacters: number;
@@ -122,13 +124,25 @@ function normalizeOutputBudget(
 
 function normalizeRequestExtensions(
   value: OpenAICompatibleReviewProviderConfig["requestExtensions"],
-): { reasoningSplit?: true } | undefined {
+): { reasoningSplit?: true; thinking?: OpenAICompatibleThinkingMode } | undefined {
   if (!value) return undefined;
   if (value.reasoningSplit !== undefined && typeof value.reasoningSplit !== "boolean") {
     throw new Error("Provider reasoningSplit request extension must be boolean.");
   }
+  if (
+    value.thinking !== undefined &&
+    value.thinking !== "disabled" &&
+    value.thinking !== "adaptive" &&
+    value.thinking !== "enabled"
+  ) {
+    throw new Error("Provider thinking request extension must be disabled, adaptive, or enabled.");
+  }
+  if (value.reasoningSplit === true && value.thinking === "disabled") {
+    throw new Error("Provider reasoningSplit cannot be combined with thinking=disabled.");
+  }
   return {
     ...(value.reasoningSplit === true ? { reasoningSplit: true as const } : {}),
+    ...(value.thinking !== undefined ? { thinking: value.thinking } : {}),
   };
 }
 
@@ -253,7 +267,9 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
   readonly #apiKey: string;
   readonly #timeoutMs: number;
   readonly #responseFormat: "json_object" | "none";
-  readonly #requestExtensions: { reasoningSplit?: true } | undefined;
+  readonly #requestExtensions:
+    | { reasoningSplit?: true; thinking?: OpenAICompatibleThinkingMode }
+    | undefined;
   readonly #inputBudget: { maxPromptCharacters: number } | undefined;
   readonly #outputBudget:
     | { parameter: OpenAICompatibleOutputTokenParameter; tokens: number }
@@ -309,6 +325,9 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
               : {}),
             ...(this.#requestExtensions?.reasoningSplit === true
               ? { reasoning_split: true }
+              : {}),
+            ...(this.#requestExtensions?.thinking !== undefined
+              ? { thinking: { type: this.#requestExtensions.thinking } }
               : {}),
             ...(this.#outputBudget
               ? { [this.#outputBudget.parameter]: this.#outputBudget.tokens }
