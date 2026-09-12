@@ -208,11 +208,17 @@ async function readBoundedResponseText(response: Response) {
   } catch (error) {
     if (error instanceof ReviewProviderError) throw error;
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ReviewProviderError("Provider response stream timed out.", "timeout");
+      throw new ReviewProviderError("Provider response stream timed out.", "timeout", {
+        upstreamStatus: response.status,
+      });
     }
     throw new ReviewProviderError(
       "Provider response stream failed.",
       "provider_unavailable",
+      {
+        failureDetail: "network_response_failed",
+        upstreamStatus: response.status,
+      },
     );
   } finally {
     reader.releaseLock();
@@ -314,13 +320,18 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
         if (error instanceof DOMException && error.name === "AbortError") {
           throw new ReviewProviderError("Provider request timed out.", "timeout");
         }
-        throw new ReviewProviderError("Provider network request failed.", "provider_unavailable");
+        throw new ReviewProviderError(
+          "Provider network request failed.",
+          "provider_unavailable",
+          { failureDetail: "network_request_failed" },
+        );
       }
 
       if (!response.ok) {
         throw new ReviewProviderError(
           `Provider request failed with HTTP ${response.status}.`,
           failureClassForHttpStatus(response.status),
+          { upstreamStatus: response.status },
         );
       }
 
