@@ -90,7 +90,7 @@ function provider() {
   });
 }
 
-async function failureFor(content: unknown) {
+async function responseFor(content: unknown) {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
     Response.json({
@@ -99,19 +99,63 @@ async function failureFor(content: unknown) {
     });
 
   try {
-    await provider().review(reviewPackage());
-  } catch (error) {
-    return error;
+    return await provider().review(reviewPackage());
   } finally {
     globalThis.fetch = originalFetch;
+  }
+}
+
+async function failureFor(content: unknown) {
+  try {
+    await responseFor(content);
+  } catch (error) {
+    return error;
   }
   throw new Error("Expected provider review to fail");
 }
 
-test("classifies a fenced review without logging or returning provider content", async () => {
-  const error = await failureFor(
-    '```json\n{"verdict":"NO_BLOCKING_FINDINGS","findings":[],"validationGaps":[]}\n```',
+const cleanReview = {
+  verdict: "NO_BLOCKING_FINDINGS",
+  findings: [],
+  validationGaps: [],
+};
+
+const cleanReviewJson = JSON.stringify(cleanReview);
+
+test("accepts exactly one whole-response JSON fence and preserves usage", async () => {
+  const response = await responseFor(`\`\`\`json\n${cleanReviewJson}\n\`\`\``);
+
+  assert.deepEqual(response.output, cleanReview);
+  assert.deepEqual(response.usage, {
+    inputTokens: 120,
+    outputTokens: 30,
+    totalTokens: 150,
+  });
+});
+
+test("accepts an unlabeled whole-response JSON fence", async () => {
+  const response = await responseFor(`\`\`\`\n${cleanReviewJson}\n\`\`\``);
+  assert.deepEqual(response.output, cleanReview);
+});
+
+test("does not unwrap fenced JSON when prose exists outside the fence", async () => {
+  const leadingProse = await failureFor(
+    `Here is the requested review.\n\`\`\`json\n${cleanReviewJson}\n\`\`\``,
   );
+  assert.ok(leadingProse instanceof ReviewProviderError);
+  assert.equal(leadingProse.failureClass, "malformed_response");
+  assert.equal(leadingProse.failureDetail, "non_json_review_text");
+
+  const trailingProse = await failureFor(
+    `\`\`\`json\n${cleanReviewJson}\n\`\`\`\nDone.`,
+  );
+  assert.ok(trailingProse instanceof ReviewProviderError);
+  assert.equal(trailingProse.failureClass, "malformed_response");
+  assert.equal(trailingProse.failureDetail, "review_json_fenced");
+});
+
+test("keeps malformed or incomplete fences as explicit fenced-review failures", async () => {
+  const error = await failureFor(`\`\`\`json\n${cleanReviewJson}`);
   assert.ok(error instanceof ReviewProviderError);
   assert.equal(error.failureClass, "malformed_response");
   assert.equal(error.failureDetail, "review_json_fenced");

@@ -239,6 +239,12 @@ async function readBoundedResponseText(response: Response) {
   }
 }
 
+function unwrapSingleJsonFence(content: string) {
+  const trimmed = content.trim();
+  const match = /^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i.exec(trimmed);
+  return match ? match[1].trim() : content;
+}
+
 function reviewJsonFailureDetail(content: string): ReviewFailureDetail {
   const trimmed = content.trimStart();
   if (trimmed.startsWith("```")) return "review_json_fenced";
@@ -247,12 +253,13 @@ function reviewJsonFailureDetail(content: string): ReviewFailureDetail {
 }
 
 function parseProviderJson(content: string, usage?: ReviewProviderUsage) {
+  const normalized = unwrapSingleJsonFence(content);
   try {
-    return JSON.parse(content) as unknown;
+    return JSON.parse(normalized) as unknown;
   } catch {
     throw malformed(
       "Provider returned invalid JSON review output.",
-      reviewJsonFailureDetail(content),
+      reviewJsonFailureDetail(normalized),
       usage,
     );
   }
