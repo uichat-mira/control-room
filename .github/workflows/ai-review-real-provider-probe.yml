@@ -75,6 +75,8 @@ jobs:
             latencyMs: attempt.latencyMs,
             failureClass: attempt.failureClass ?? null,
             failureDetail: attempt.failureDetail ?? null,
+            normalizationReason: attempt.normalizationReason ?? null,
+            normalizationPath: attempt.normalizationPath ?? null,
             upstreamStatus: attempt.upstreamStatus ?? null,
             usage: attempt.usage ?? null,
           }));
