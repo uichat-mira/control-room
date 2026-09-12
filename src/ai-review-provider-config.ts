@@ -18,6 +18,7 @@ export type ProviderReasoningMode =
 
 export type ProviderResponseFormat = "json_object" | "none";
 export type ReviewRouteRole = "routine" | "fallback" | "escalation";
+export type OpenAIChatThinkingMode = "disabled" | "adaptive" | "enabled";
 
 export interface ProviderCredentialConfig {
   type: "bearer";
@@ -31,8 +32,7 @@ export interface ProviderTransportConfig {
 
 export interface OpenAIChatDriverOptions {
   reasoningSplit?: boolean;
-  stream?: boolean;
-  includeUsage?: boolean;
+  thinking?: OpenAIChatThinkingMode;
 }
 
 export interface ProviderModelConfig {
@@ -140,23 +140,26 @@ function validateOpenAIChatOptions(
     options.reasoningSplit,
     `${providerId}/${modelKey}.driverOptions.openaiChat.reasoningSplit`,
   );
-  validateOptionalBoolean(
-    options.stream,
-    `${providerId}/${modelKey}.driverOptions.openaiChat.stream`,
-  );
-  validateOptionalBoolean(
-    options.includeUsage,
-    `${providerId}/${modelKey}.driverOptions.openaiChat.includeUsage`,
-  );
+
+  if (
+    options.thinking !== undefined &&
+    options.thinking !== "disabled" &&
+    options.thinking !== "adaptive" &&
+    options.thinking !== "enabled"
+  ) {
+    throw new Error(
+      `${providerId}/${modelKey}.driverOptions.openaiChat.thinking must be disabled, adaptive, or enabled.`,
+    );
+  }
 
   if (options.reasoningSplit === true && model.capabilities?.reasoning !== "separate") {
     throw new Error(
       `${providerId}/${modelKey} reasoningSplit=true requires capabilities.reasoning=separate.`,
     );
   }
-  if (options.includeUsage === true && options.stream !== true) {
+  if (options.reasoningSplit === true && options.thinking === "disabled") {
     throw new Error(
-      `${providerId}/${modelKey} includeUsage=true requires stream=true.`,
+      `${providerId}/${modelKey} reasoningSplit=true is incompatible with thinking=disabled.`,
     );
   }
 }
