@@ -31,6 +31,8 @@ export interface ProviderTransportConfig {
 
 export interface OpenAIChatDriverOptions {
   reasoningSplit?: boolean;
+  stream?: boolean;
+  includeUsage?: boolean;
 }
 
 export interface ProviderModelConfig {
@@ -113,6 +115,12 @@ function validateEndpoint(value: string, label: string) {
   }
 }
 
+function validateOptionalBoolean(value: unknown, label: string) {
+  if (value !== undefined && typeof value !== "boolean") {
+    throw new Error(`${label} must be boolean.`);
+  }
+}
+
 function validateOpenAIChatOptions(
   providerId: string,
   modelKey: string,
@@ -128,18 +136,27 @@ function validateOpenAIChatOptions(
     );
   }
 
-  if (
-    options.reasoningSplit !== undefined &&
-    typeof options.reasoningSplit !== "boolean"
-  ) {
-    throw new Error(
-      `${providerId}/${modelKey}.driverOptions.openaiChat.reasoningSplit must be boolean.`,
-    );
-  }
+  validateOptionalBoolean(
+    options.reasoningSplit,
+    `${providerId}/${modelKey}.driverOptions.openaiChat.reasoningSplit`,
+  );
+  validateOptionalBoolean(
+    options.stream,
+    `${providerId}/${modelKey}.driverOptions.openaiChat.stream`,
+  );
+  validateOptionalBoolean(
+    options.includeUsage,
+    `${providerId}/${modelKey}.driverOptions.openaiChat.includeUsage`,
+  );
 
   if (options.reasoningSplit === true && model.capabilities?.reasoning !== "separate") {
     throw new Error(
       `${providerId}/${modelKey} reasoningSplit=true requires capabilities.reasoning=separate.`,
+    );
+  }
+  if (options.includeUsage === true && options.stream !== true) {
+    throw new Error(
+      `${providerId}/${modelKey} includeUsage=true requires stream=true.`,
     );
   }
 }
