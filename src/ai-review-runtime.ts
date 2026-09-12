@@ -26,7 +26,9 @@ export type ReviewFailureDetail =
   | "review_json_fenced"
   | "non_json_review_text"
   | "invalid_review_json"
-  | "invalid_review_contract";
+  | "invalid_review_contract"
+  | "network_request_failed"
+  | "network_response_failed";
 
 export interface ReviewFinding {
   severity: MiraReviewSeverity;
@@ -79,6 +81,7 @@ export interface ProviderAttempt {
   latencyMs: number;
   failureClass?: ReviewFailureClass;
   failureDetail?: ReviewFailureDetail;
+  upstreamStatus?: number;
   usage?: ReviewProviderUsage;
 }
 
@@ -104,6 +107,7 @@ export type ReviewExecutionResult = CompletedReviewExecution | UnavailableReview
 export class ReviewProviderError extends Error {
   readonly failureClass: ReviewFailureClass;
   readonly failureDetail: ReviewFailureDetail | undefined;
+  readonly upstreamStatus: number | undefined;
   readonly usage: ReviewProviderUsage | undefined;
 
   constructor(
@@ -111,6 +115,7 @@ export class ReviewProviderError extends Error {
     failureClass: ReviewFailureClass,
     options: {
       failureDetail?: ReviewFailureDetail;
+      upstreamStatus?: number;
       usage?: ReviewProviderUsage;
     } = {},
   ) {
@@ -118,6 +123,7 @@ export class ReviewProviderError extends Error {
     this.name = "ReviewProviderError";
     this.failureClass = failureClass;
     this.failureDetail = options.failureDetail;
+    this.upstreamStatus = options.upstreamStatus;
     this.usage = options.usage;
   }
 }
@@ -261,12 +267,14 @@ function technicalFailure(
 ): {
   failureClass: ReviewFailureClass;
   failureDetail?: ReviewFailureDetail;
+  upstreamStatus?: number;
   usage?: ReviewProviderUsage;
 } {
   if (error instanceof ReviewProviderError) {
     return {
       failureClass: error.failureClass,
       ...(error.failureDetail ? { failureDetail: error.failureDetail } : {}),
+      ...(error.upstreamStatus !== undefined ? { upstreamStatus: error.upstreamStatus } : {}),
       ...(error.usage ?? providerUsage ? { usage: error.usage ?? providerUsage } : {}),
     };
   }

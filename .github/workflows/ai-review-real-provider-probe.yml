@@ -1,11 +1,6 @@
 name: AI Review Real Provider Probe
 
 on:
-  push:
-    branches:
-      - prod
-    paths:
-      - '.github/workflows/ai-review-real-provider-probe.yml'
   workflow_dispatch:
 
 permissions:
@@ -20,7 +15,7 @@ jobs:
       AI_REVIEW_HEALTH_URL: https://control.mira.tomz.io/api/v1/ai-review/health
       AI_REVIEW_EXECUTION_URL: https://control.mira.tomz.io/api/v1/ai-review/review
     steps:
-      - name: Verify configured CODE_REVIEW routine
+      - name: Verify enabled CODE_REVIEW routine
         shell: bash
         run: |
           set -euo pipefail
@@ -42,6 +37,9 @@ jobs:
           if (!routine) throw new Error('CODE_REVIEW routine route is missing');
           if (routine.state !== 'configured') {
             throw new Error(`CODE_REVIEW routine is not configured: ${routine.state}`);
+          }
+          if (routine.enabled !== true) {
+            throw new Error(`CODE_REVIEW routine is not enabled: ${routine.enabled}`);
           }
           if (routine.provider !== 'minimax-cn-codeplan' || routine.model !== 'm3') {
             throw new Error(`Unexpected routine target: ${routine.provider}/${routine.model}`);
@@ -77,6 +75,7 @@ jobs:
             latencyMs: attempt.latencyMs,
             failureClass: attempt.failureClass ?? null,
             failureDetail: attempt.failureDetail ?? null,
+            upstreamStatus: attempt.upstreamStatus ?? null,
             usage: attempt.usage ?? null,
           }));
 
