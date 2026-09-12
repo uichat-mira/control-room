@@ -80,3 +80,13 @@ test("keeps runtime identity and deterministic gaps in system context while PR e
   assert.doesNotMatch(user, /missing_repository_profile/);
   assert.doesNotMatch(user, /policyBlobSha/);
 });
+
+test("makes the normalized findings and validation-gap JSON shapes explicit", () => {
+  const system = buildReviewPrompt(pkg()).messages[0].content;
+
+  assert.match(system, /findings must be a JSON array of finding objects/);
+  assert.match(system, /validationGaps must be a JSON array of non-empty strings only/);
+  assert.match(system, /Never return objects or nested structures inside validationGaps/);
+  assert.match(system, /Do not copy deterministicValidationGaps objects verbatim/);
+  assert.match(system, /Use \[\] when no meaningful validation gap exists/);
+});
