@@ -1,0 +1,81 @@
+name: AI Review Normalization One-shot
+
+on:
+  push:
+    branches:
+      - prod
+    paths:
+      - '.github/workflows/ai-review-normalization-one-shot.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      AI_REVIEW_GATEWAY_TOKEN: ${{ secrets.AI_REVIEW_GATEWAY_TOKEN }}
+      AI_REVIEW_HEALTH_URL: https://control.mira.tomz.io/api/v1/ai-review/health
+      AI_REVIEW_EXECUTION_URL: https://control.mira.tomz.io/api/v1/ai-review/review
+    steps:
+      - name: Verify enabled CODE_REVIEW routine
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "$AI_REVIEW_HEALTH_URL" \
+            --output /tmp/ai-review-health.json
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const health = JSON.parse(fs.readFileSync('/tmp/ai-review-health.json', 'utf8'));
+          const routine = health.providerRoutes?.CODE_REVIEW?.routine;
+          if (!routine || routine.state !== 'configured' || routine.enabled !== true) {
+            throw new Error(`Routine not executable: ${JSON.stringify(routine)}`);
+          }
+          if (routine.provider !== 'minimax-cn-codeplan' || routine.model !== 'm3') {
+            throw new Error(`Unexpected routine: ${routine.provider}/${routine.model}`);
+          }
+          console.log(`Diagnostic target: ${routine.provider}/${routine.model}`);
+          NODE
+
+      - name: Execute exactly one diagnostic review
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload='{"repository":"uichat-mira/mira-mobile","pullRequest":108}'
+          status="$(curl --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer ${AI_REVIEW_GATEWAY_TOKEN}" \
+            --data "$payload" \
+            --output /tmp/ai-review-execution.json \
+            --write-out '%{http_code}' \
+            "$AI_REVIEW_EXECUTION_URL")"
+
+          STATUS="$status" node <<'NODE'
+          const fs = require('node:fs');
+          const status = Number(process.env.STATUS);
+          const result = JSON.parse(fs.readFileSync('/tmp/ai-review-execution.json', 'utf8'));
+          const attempts = Array.isArray(result.execution?.attempts) ? result.execution.attempts : [];
+          const safeAttempts = attempts.map((attempt) => ({
+            provider: attempt.provider,
+            model: attempt.model,
+            role: attempt.role,
+            status: attempt.status,
+            latencyMs: attempt.latencyMs,
+            failureClass: attempt.failureClass ?? null,
+            failureDetail: attempt.failureDetail ?? null,
+            normalizationReason: attempt.normalizationReason ?? null,
+            normalizationPath: attempt.normalizationPath ?? null,
+            upstreamStatus: attempt.upstreamStatus ?? null,
+            usage: attempt.usage ?? null,
+          }));
+          console.log(`Review HTTP status: ${status}`);
+          console.log(`Review state: ${result.execution?.state ?? 'missing'}`);
+          console.log(`Attempts: ${JSON.stringify(safeAttempts)}`);
+          if (status !== 200 || result.execution?.state !== 'COMPLETED') {
+            throw new Error(`Diagnostic review did not complete: HTTP ${status}, state=${result.execution?.state ?? 'missing'}, reason=${result.execution?.reason ?? 'none'}`);
+          }
+          console.log(`Diagnostic review completed: verdict=${result.execution.review?.verdict ?? 'missing'}`);
+          NODE
