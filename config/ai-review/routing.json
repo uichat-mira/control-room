@@ -4,43 +4,52 @@
     "CODE_REVIEW": {
       "routine": {
         "provider": "minimax-cn-codeplan",
-        "model": "m3"
+        "model": "m3",
+        "enabled": true
       },
       "fallback": {
         "provider": "opencode-go",
-        "model": "deepseek-v4-flash"
+        "model": "deepseek-v4-flash",
+        "enabled": false
       },
       "escalation": {
         "provider": "opencode-go",
-        "model": "deepseek-v4-pro"
+        "model": "deepseek-v4-pro",
+        "enabled": false
       }
     },
     "PROMOTION_REVIEW": {
       "routine": {
         "provider": "minimax-cn-codeplan",
-        "model": "m3"
+        "model": "m3",
+        "enabled": false
       },
       "fallback": {
         "provider": "opencode-go",
-        "model": "deepseek-v4-flash"
+        "model": "deepseek-v4-flash",
+        "enabled": false
       },
       "escalation": {
         "provider": "opencode-go",
-        "model": "deepseek-v4-pro"
+        "model": "deepseek-v4-pro",
+        "enabled": false
       }
     },
     "RELEASE_REVIEW": {
       "routine": {
         "provider": "opencode-go",
-        "model": "deepseek-v4-pro"
+        "model": "deepseek-v4-pro",
+        "enabled": false
       },
       "fallback": {
         "provider": "minimax-cn-codeplan",
-        "model": "m3"
+        "model": "m3",
+        "enabled": false
       },
       "escalation": {
         "provider": "opencode-go",
-        "model": "glm-5.3"
+        "model": "glm-5.3",
+        "enabled": false
       }
     }
   }

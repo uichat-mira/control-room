@@ -105,39 +105,42 @@ test("reports modeled CODE_REVIEW routes without exposing provider configuration
   assert.equal(registry.providers.length, 0);
   assert.deepEqual(registry.route.routine, {
     state: "unconfigured",
+    enabled: true,
     provider: "minimax-cn-codeplan",
     model: "m3",
     driver: "openai-chat",
   });
   assert.deepEqual(registry.route.fallback, {
     state: "unconfigured",
+    enabled: false,
     provider: "opencode-go",
     model: "deepseek-v4-flash",
     driver: "openai-chat",
   });
   assert.deepEqual(registry.route.escalation, {
     state: "unconfigured",
+    enabled: false,
     provider: "opencode-go",
     model: "deepseek-v4-pro",
     driver: "openai-chat",
   });
 });
 
-test("keeps executable providers in routine then technical-fallback order while escalation stays out of the queue", () => {
+test("keeps configured but disabled fallback and escalation out of the execution queue", () => {
   const registry = buildReviewProviderRegistry(
     { ...routineEnv, ...fallbackEnv },
     "CODE_REVIEW",
   );
 
   assert.equal(registry.route.routine.state, "configured");
+  assert.equal(registry.route.routine.enabled, true);
   assert.equal(registry.route.fallback?.state, "configured");
+  assert.equal(registry.route.fallback?.enabled, false);
   assert.equal(registry.route.escalation?.state, "configured");
-  assert.equal(registry.providers.length, 2);
+  assert.equal(registry.route.escalation?.enabled, false);
+  assert.equal(registry.providers.length, 1);
   assert.equal(registry.providers[0].id, "minimax-cn-codeplan/m3");
   assert.equal(registry.providers[0].role, "routine");
-  assert.equal(registry.providers[1].id, "opencode-go/deepseek-v4-flash");
-  assert.equal(registry.providers[1].role, "fallback");
-  assert.equal(registry.providers.some((provider) => provider.role === "escalation"), false);
 });
 
 test("returns REVIEW_UNAVAILABLE when no provider account credential is configured", async () => {
@@ -145,8 +148,11 @@ test("returns REVIEW_UNAVAILABLE when no provider account credential is configur
 
   assert.equal(result.executionVersion, "mira-ai-review-execution/v0");
   assert.equal(result.providerRoute.routine.state, "unconfigured");
+  assert.equal(result.providerRoute.routine.enabled, true);
   assert.equal(result.providerRoute.fallback?.state, "unconfigured");
+  assert.equal(result.providerRoute.fallback?.enabled, false);
   assert.equal(result.providerRoute.escalation?.state, "unconfigured");
+  assert.equal(result.providerRoute.escalation?.enabled, false);
   assert.equal(result.identity.reviewMode, "CODE_REVIEW");
   assert.deepEqual(result.identity.taskContract, {
     state: "unavailable",
@@ -273,7 +279,7 @@ test("does not downgrade CONTRACT_CONFLICT when a deterministic gap is material"
   assert.equal(result.execution.review.verdict, "CONTRACT_CONFLICT");
 });
 
-test("falls back across provider accounts after a technical routine failure without exposing either key", async (t) => {
+test("does not invoke a configured fallback while the fallback route is disabled", async (t) => {
   const originalFetch = globalThis.fetch;
   const requested: string[] = [];
   const bodies: string[] = [];
@@ -296,14 +302,14 @@ test("falls back across provider accounts after a technical routine failure with
     pkg(),
   );
 
-  assert.equal(result.execution.state, "COMPLETED");
-  if (result.execution.state !== "COMPLETED") return;
-  assert.equal(result.execution.provider.id, "opencode-go/deepseek-v4-flash");
-  assert.equal(result.execution.provider.role, "fallback");
-  assert.equal(result.execution.attempts.length, 2);
+  assert.equal(result.providerRoute.fallback?.state, "configured");
+  assert.equal(result.providerRoute.fallback?.enabled, false);
+  assert.equal(result.execution.state, "REVIEW_UNAVAILABLE");
+  if (result.execution.state !== "REVIEW_UNAVAILABLE") return;
+  assert.equal(result.execution.reason, "all_eligible_providers_failed");
+  assert.equal(result.execution.attempts.length, 1);
   assert.equal(result.execution.attempts[0].failureClass, "provider_unavailable");
-  assert.equal(result.execution.attempts[1].status, "success");
-  assert.equal(requested.length, 2);
+  assert.equal(requested.length, 1);
   assert.equal(bodies.some((body) => body.includes("minimax-secret")), false);
   assert.equal(bodies.some((body) => body.includes("opencode-go-secret")), false);
 });
