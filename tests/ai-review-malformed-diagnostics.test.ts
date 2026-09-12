@@ -114,6 +114,24 @@ async function failureFor(content: unknown) {
   throw new Error("Expected provider review to fail");
 }
 
+async function contractFailureFor(output: unknown) {
+  const invalidContract: ReviewProvider<null> = {
+    id: "provider/m3",
+    model: "MiniMax-M3",
+    role: "routine",
+    async review() {
+      return {
+        output,
+        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+      };
+    },
+  };
+
+  const result = await executeReviewWithFallback(null, [invalidContract]);
+  assert.equal(result.state, "REVIEW_UNAVAILABLE");
+  return result.attempts[0];
+}
+
 const cleanReview = {
   verdict: "NO_BLOCKING_FINDINGS",
   findings: [],
@@ -204,28 +222,57 @@ test("preserves provider usage and safe detail on failed attempts", async () => 
   });
 });
 
-test("marks a structurally invalid review contract after valid provider JSON", async () => {
-  const invalidContract: ReviewProvider<null> = {
-    id: "provider/m3",
-    model: "MiniMax-M3",
-    role: "routine",
-    async review() {
-      return {
-        output: { verdict: "PASS" },
-        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
-      };
-    },
-  };
+test("reports safe normalization reason and path for an invalid verdict", async () => {
+  const attempt = await contractFailureFor({
+    verdict: "PASS",
+    findings: [],
+    validationGaps: [],
+  });
 
-  const result = await executeReviewWithFallback(null, [invalidContract]);
-  assert.equal(result.state, "REVIEW_UNAVAILABLE");
-  assert.equal(result.attempts[0].failureClass, "malformed_response");
-  assert.equal(result.attempts[0].failureDetail, "invalid_review_contract");
-  assert.deepEqual(result.attempts[0].usage, {
+  assert.equal(attempt.failureClass, "malformed_response");
+  assert.equal(attempt.failureDetail, "invalid_review_contract");
+  assert.equal(attempt.normalizationReason, "verdict_invalid");
+  assert.equal(attempt.normalizationPath, "review.verdict");
+  assert.deepEqual(attempt.usage, {
     inputTokens: 10,
     outputTokens: 2,
     totalTokens: 12,
   });
+});
+
+test("reports the schema path for a missing finding field without exposing values", async () => {
+  const attempt = await contractFailureFor({
+    verdict: "CHANGES_NEEDED",
+    findings: [
+      {
+        severity: "P1",
+        observation: "observed",
+        inference: "inferred",
+        judgment: "judged",
+        impact: "impact",
+        location: "a.ts:1",
+        suggestedFix: "fix",
+      },
+    ],
+    validationGaps: [],
+  });
+
+  assert.equal(attempt.failureDetail, "invalid_review_contract");
+  assert.equal(attempt.normalizationReason, "finding_field_invalid");
+  assert.equal(attempt.normalizationPath, "review.findings[0].verification");
+});
+
+test("reports invalid validation-gap shape without serializing provider content", async () => {
+  const attempt = await contractFailureFor({
+    verdict: "HUMAN_CHECK_NEEDED",
+    findings: [],
+    validationGaps: [{ detail: "private provider text" }],
+  });
+
+  assert.equal(attempt.failureDetail, "invalid_review_contract");
+  assert.equal(attempt.normalizationReason, "validation_gap_invalid");
+  assert.equal(attempt.normalizationPath, "review.validationGaps[0]");
+  assert.equal(JSON.stringify(attempt).includes("private provider text"), false);
 });
 
 test("classifies missing message content while retaining usage", async () => {
