@@ -68,6 +68,7 @@ export interface ProviderCatalogConfig {
 export interface ReviewRouteTarget {
   provider: string;
   model: string;
+  enabled: boolean;
 }
 
 export interface ReviewRouteConfig {
@@ -153,6 +154,9 @@ function validateTarget(
   const model = provider.models[target.model];
   if (!model) {
     throw new Error(`${label} references unknown model ${target.provider}/${target.model}.`);
+  }
+  if (typeof target.enabled !== "boolean") {
+    throw new Error(`${label}.enabled must be boolean.`);
   }
 }
 
