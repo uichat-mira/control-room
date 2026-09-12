@@ -1,0 +1,100 @@
+name: AI Review Cloudflare Metrics One-shot
+
+on:
+  push:
+    branches:
+      - prod
+    paths:
+      - '.github/workflows/ai-review-cloudflare-metrics-one-shot.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Query completed AI Review invocation metrics
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+
+          node <<'NODE' > /tmp/query.json
+          const query = `query GetWorkersAnalytics($accountTag: string, $datetimeStart: string, $datetimeEnd: string, $scriptName: string) {
+            viewer {
+              accounts(filter: {accountTag: $accountTag}) {
+                workersInvocationsAdaptive(limit: 100, filter: {
+                  scriptName: $scriptName,
+                  datetime_geq: $datetimeStart,
+                  datetime_leq: $datetimeEnd
+                }) {
+                  sum { requests subrequests errors }
+                  quantiles {
+                    cpuTimeP50
+                    cpuTimeP99
+                    memoryUsageBytesP50
+                    memoryUsageBytesP99
+                  }
+                  dimensions { datetime scriptName status }
+                }
+              }
+            }
+          }`;
+          process.stdout.write(JSON.stringify({
+            query,
+            variables: {
+              accountTag: process.env.CLOUDFLARE_ACCOUNT_ID,
+              datetimeStart: '2026-09-12T08:11:35.000Z',
+              datetimeEnd: '2026-09-12T08:11:44.000Z',
+              scriptName: 'uichat-mira-control-room',
+            },
+          }));
+          NODE
+
+          curl --fail --silent --show-error \
+            'https://api.cloudflare.com/client/v4/graphql' \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/json' \
+            --data @/tmp/query.json \
+            --output /tmp/result.json
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const result = JSON.parse(fs.readFileSync('/tmp/result.json', 'utf8'));
+          if (Array.isArray(result.errors) && result.errors.length) {
+            const safe = result.errors.map(({ message }) => ({ message }));
+            throw new Error(`Cloudflare GraphQL errors: ${JSON.stringify(safe)}`);
+          }
+          const rows = result.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive;
+          if (!Array.isArray(rows) || rows.length === 0) {
+            throw new Error('No Worker invocation metrics found for the completed review window.');
+          }
+          const safeRows = rows.map((row) => ({
+            datetime: row.dimensions?.datetime,
+            status: row.dimensions?.status,
+            requests: row.sum?.requests,
+            subrequests: row.sum?.subrequests,
+            errors: row.sum?.errors,
+            cpuTimeP50: row.quantiles?.cpuTimeP50,
+            cpuTimeP99: row.quantiles?.cpuTimeP99,
+            memoryUsageBytesP50: row.quantiles?.memoryUsageBytesP50,
+            memoryUsageBytesP99: row.quantiles?.memoryUsageBytesP99,
+          }));
+          console.log(`Cloudflare AI Review window metrics: ${JSON.stringify(safeRows)}`);
+          const totalRequests = safeRows.reduce((sum, row) => sum + Number(row.requests || 0), 0);
+          console.log(`Window request count: ${totalRequests}`);
+          if (totalRequests !== 1) {
+            console.log('Window is not single-invocation; metrics must be treated as aggregate evidence only.');
+          } else {
+            console.log('Window contains exactly one invocation; quantiles equal the completed review invocation metrics.');
+          }
+          NODE
+
+          rm -f /tmp/query.json /tmp/result.json
