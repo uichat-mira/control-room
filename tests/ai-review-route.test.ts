@@ -120,12 +120,15 @@ test("returns explicit REVIEW_UNAVAILABLE after building the trusted package whe
   assert.equal(body.identity.headSha, HEAD_SHA);
   assert.deepEqual(body.providerRoute.routine, {
     state: "unconfigured",
+    enabled: true,
     provider: "minimax-cn-codeplan",
     model: "m3",
     driver: "openai-chat",
   });
   assert.equal(body.providerRoute.fallback.state, "unconfigured");
+  assert.equal(body.providerRoute.fallback.enabled, false);
   assert.equal(body.providerRoute.escalation.state, "unconfigured");
+  assert.equal(body.providerRoute.escalation.enabled, false);
   assert.deepEqual(body.execution, {
     state: "REVIEW_UNAVAILABLE",
     reason: "no_eligible_provider",
@@ -133,13 +136,14 @@ test("returns explicit REVIEW_UNAVAILABLE after building the trusted package whe
   });
 });
 
-test("health exposes modeled route identities and states, never provider credentials or endpoints", async () => {
+test("health exposes credential state and route activation separately without provider secrets or endpoints", async () => {
   const response = await handleAiReviewRequest(
     new Request("https://control.example/api/v1/ai-review/health"),
     {
       GITHUB_READ_TOKEN: "github-token",
       AI_REVIEW_GATEWAY_TOKEN: "caller-token",
       AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "provider-secret-key",
+      AI_PROVIDER_OPENCODE_GO_KEY: "fallback-secret-key",
     },
   );
   const text = await response.text();
@@ -150,12 +154,26 @@ test("health exposes modeled route identities and states, never provider credent
   assert.equal(body.executionVersion, "mira-ai-review-execution/v0");
   assert.deepEqual(body.providerRoutes.CODE_REVIEW.routine, {
     state: "configured",
+    enabled: true,
     provider: "minimax-cn-codeplan",
     model: "m3",
     driver: "openai-chat",
   });
-  assert.equal(body.providerRoutes.CODE_REVIEW.fallback.state, "unconfigured");
-  assert.equal(body.providerRoutes.CODE_REVIEW.escalation.state, "unconfigured");
+  assert.deepEqual(body.providerRoutes.CODE_REVIEW.fallback, {
+    state: "configured",
+    enabled: false,
+    provider: "opencode-go",
+    model: "deepseek-v4-flash",
+    driver: "openai-chat",
+  });
+  assert.deepEqual(body.providerRoutes.CODE_REVIEW.escalation, {
+    state: "configured",
+    enabled: false,
+    provider: "opencode-go",
+    model: "deepseek-v4-pro",
+    driver: "openai-chat",
+  });
   assert.equal(text.includes("provider-secret-key"), false);
+  assert.equal(text.includes("fallback-secret-key"), false);
   assert.equal(text.includes("https://api.minimaxi.com"), false);
 });
