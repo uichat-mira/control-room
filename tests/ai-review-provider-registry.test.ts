@@ -33,7 +33,7 @@ test("catalog models provider accounts independently from review roles", () => {
   );
 });
 
-test("provider secret references are the only runtime configuration values", () => {
+test("provider secret references are the only runtime credential configuration values", () => {
   assert.deepEqual(configuredProviderSecretRefs().sort(), [
     "AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY",
     "AI_PROVIDER_OPENCODE_GO_KEY",
@@ -41,15 +41,23 @@ test("provider secret references are the only runtime configuration values", () 
   ]);
 });
 
-test("CODE_REVIEW uses MiniMax routine, cross-provider OpenCode fallback, and separate escalation", () => {
+test("CODE_REVIEW keeps only MiniMax routine enabled during the pilot", () => {
   assert.deepEqual(REVIEW_ROUTING.routes.CODE_REVIEW, {
-    routine: { provider: "minimax-cn-codeplan", model: "m3" },
-    fallback: { provider: "opencode-go", model: "deepseek-v4-flash" },
-    escalation: { provider: "opencode-go", model: "deepseek-v4-pro" },
+    routine: { provider: "minimax-cn-codeplan", model: "m3", enabled: true },
+    fallback: {
+      provider: "opencode-go",
+      model: "deepseek-v4-flash",
+      enabled: false,
+    },
+    escalation: {
+      provider: "opencode-go",
+      model: "deepseek-v4-pro",
+      enabled: false,
+    },
   });
 });
 
-test("configured routine and fallback accounts instantiate from their own credentials", () => {
+test("provider credentials do not implicitly activate fallback or escalation", () => {
   const registry = buildReviewProviderRegistry(
     {
       AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "minimax-secret",
@@ -59,10 +67,39 @@ test("configured routine and fallback accounts instantiate from their own creden
   );
 
   assert.equal(registry.route.routine.state, "configured");
+  assert.equal(registry.route.routine.enabled, true);
   assert.equal(registry.route.fallback?.state, "configured");
-  assert.equal(registry.providers.length, 2);
+  assert.equal(registry.route.fallback?.enabled, false);
+  assert.equal(registry.route.escalation?.state, "configured");
+  assert.equal(registry.route.escalation?.enabled, false);
+  assert.equal(registry.providers.length, 1);
   assert.equal(registry.providers[0].id, "minimax-cn-codeplan/m3");
-  assert.equal(registry.providers[1].id, "opencode-go/deepseek-v4-flash");
+});
+
+test("PROMOTION_REVIEW and RELEASE_REVIEW are provisioned but disabled before rollout", () => {
+  const env = {
+    AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "minimax-secret",
+    AI_PROVIDER_OPENCODE_GO_KEY: "go-secret",
+  };
+  const promotion = buildReviewProviderRegistry(env, "PROMOTION_REVIEW");
+  const release = buildReviewProviderRegistry(env, "RELEASE_REVIEW");
+
+  assert.equal(promotion.providers.length, 0);
+  assert.equal(promotion.route.routine.state, "configured");
+  assert.equal(promotion.route.routine.enabled, false);
+  assert.equal(release.providers.length, 0);
+  assert.equal(release.route.routine.state, "configured");
+  assert.equal(release.route.routine.enabled, false);
+});
+
+test("review routes require explicit activation state", () => {
+  const routing = structuredClone(REVIEW_ROUTING);
+  (routing.routes.CODE_REVIEW.fallback as { enabled?: boolean }).enabled = undefined;
+
+  assert.throws(
+    () => validateProviderConfiguration(PROVIDER_CATALOG, routing),
+    /CODE_REVIEW\.fallback\.enabled must be boolean/,
+  );
 });
 
 test("provider review timeout is bounded by the adapter contract", () => {
@@ -80,6 +117,7 @@ test("fallback routing must provide real provider-account redundancy", () => {
   routing.routes.CODE_REVIEW.fallback = {
     provider: "minimax-cn-codeplan",
     model: "m3",
+    enabled: false,
   };
 
   assert.throws(
@@ -93,6 +131,7 @@ test("rejects route targets that reference a model absent from the provider acco
   routing.routes.CODE_REVIEW.routine = {
     provider: "minimax-cn-codeplan",
     model: "does-not-exist",
+    enabled: true,
   };
 
   assert.throws(
