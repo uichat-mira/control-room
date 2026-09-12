@@ -25,7 +25,9 @@
           },
           "driverOptions": {
             "openaiChat": {
-              "reasoningSplit": true
+              "reasoningSplit": true,
+              "stream": true,
+              "includeUsage": true
             }
           },
           "reviewDefaults": {
