@@ -25,6 +25,7 @@ export type ReviewProviderRouteState =
 
 export interface ReviewRouteStatus {
   state: ReviewProviderRouteState;
+  enabled: boolean;
   provider: string;
   model: string;
   driver: string;
@@ -56,6 +57,7 @@ function statusFor(
 ): ReviewRouteStatus {
   return {
     state,
+    enabled: target.enabled,
     provider: target.provider,
     model: target.model,
     driver: transport.driver,
@@ -114,6 +116,10 @@ function instantiateTarget(
 
   if (transport.driver !== "openai-chat") {
     return { status: statusFor(target, "unsupported", transport) };
+  }
+
+  if (!target.enabled) {
+    return { status: statusFor(target, "configured", transport) };
   }
 
   try {
