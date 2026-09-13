@@ -3,6 +3,7 @@ import type { AiReviewEnv } from "./ai-review.ts";
 export function sharedAiReviewEnv(env: AiReviewEnv): AiReviewEnv {
   return {
     GITHUB_READ_TOKEN: env.GITHUB_READ_TOKEN,
+    GITHUB_PUBLISH_TOKEN: env.GITHUB_PUBLISH_TOKEN,
     AI_REVIEW_GATEWAY_TOKEN: env.AI_REVIEW_GATEWAY_TOKEN,
     AI_REVIEW_POLICY_REF: env.AI_REVIEW_POLICY_REF,
     AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: env.AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY,
