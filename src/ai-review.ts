@@ -11,11 +11,24 @@ import {
   executeTrustedReviewPackage,
 } from "./ai-review-execution.ts";
 import {
+  PUBLISH_PILOT_REPOSITORY,
+  compareReviewFreshness,
+  publishReviewComment,
+  renderPublicationUnavailableComment,
+  renderReviewComment,
+  renderReviewUnavailableComment,
+  renderStaleReviewComment,
+  type AiReviewPublicationEnv,
+} from "./ai-review-publication.ts";
+import {
   buildReviewRoutingHealth,
   type AiReviewProviderEnv,
 } from "./ai-review-provider-registry.ts";
 
-export interface AiReviewEnv extends AiReviewPackageEnv, AiReviewProviderEnv {
+export interface AiReviewEnv
+  extends AiReviewPackageEnv,
+    AiReviewProviderEnv,
+    AiReviewPublicationEnv {
   AI_REVIEW_GATEWAY_TOKEN?: string;
 }
 
@@ -64,15 +77,18 @@ async function authorized(request: Request, env: AiReviewEnv) {
 
 function health(env: AiReviewEnv) {
   const providerRoutes = buildReviewRoutingHealth(env);
+  const publisherConfigured = Boolean(env.GITHUB_PUBLISH_TOKEN?.trim());
   return {
     ok: true,
     service: "mira-ai-review-gateway",
     runtimeVersion: AI_REVIEW_RUNTIME_VERSION,
     packageVersion: REVIEW_PACKAGE_VERSION,
     executionVersion: REVIEW_EXECUTION_VERSION,
-    mode: "review-execution-unpublished",
+    mode: publisherConfigured ? "review-publication-pilot" : "review-execution-unpublished",
     github: env.GITHUB_READ_TOKEN ? "configured" : "unconfigured",
     callerAuth: env.AI_REVIEW_GATEWAY_TOKEN ? "configured" : "unconfigured",
+    publisherAuth: publisherConfigured ? "configured" : "unconfigured",
+    publisherRepository: PUBLISH_PILOT_REPOSITORY,
     policyRef: env.AI_REVIEW_POLICY_REF?.trim() || "main",
     providerRoutes,
   };
@@ -183,6 +199,132 @@ async function executeReviewResponse(request: Request, env: AiReviewEnv) {
   }
 }
 
+async function publishUnavailableForTarget(
+  env: AiReviewEnv,
+  target: ReviewTarget,
+  reason: string,
+) {
+  try {
+    const publication = await publishReviewComment(
+      env,
+      target.repository,
+      target.pullRequest,
+      renderPublicationUnavailableComment(target.repository, target.pullRequest, reason),
+    );
+    return { ok: true as const, publication };
+  } catch {
+    return { ok: false as const };
+  }
+}
+
+async function executeAndPublishReviewResponse(request: Request, env: AiReviewEnv) {
+  const target = await parseAuthorizedTarget(request, env);
+  if (target instanceof Response) return target;
+
+  if (target.repository !== PUBLISH_PILOT_REPOSITORY) {
+    return json(
+      {
+        error: "publisher_repository_not_allowed",
+        message: `AI Review publication is limited to ${PUBLISH_PILOT_REPOSITORY} during the V1 pilot.`,
+      },
+      { status: 403 },
+    );
+  }
+  if (!env.GITHUB_PUBLISH_TOKEN?.trim()) {
+    return json(
+      {
+        error: "publisher_unconfigured",
+        message: "GITHUB_PUBLISH_TOKEN is required before Mira Review can publish to GitHub.",
+      },
+      { status: 503 },
+    );
+  }
+
+  let pkg: ReviewPackage;
+  try {
+    pkg = await buildReviewPackageData(env, target.repository, target.pullRequest);
+  } catch (error) {
+    const reason = error instanceof ReviewPackageError ? error.code : "review_package_failed";
+    await publishUnavailableForTarget(env, target, reason);
+    if (error instanceof ReviewPackageError) return packageErrorResponse(error);
+    return unexpectedPackageError(error);
+  }
+
+  let envelope;
+  try {
+    envelope = await executeTrustedReviewPackage(env, pkg);
+  } catch {
+    await publishUnavailableForTarget(env, target, "review_execution_failed");
+    return json(
+      {
+        error: "review_execution_failed",
+        message: "AI Review execution failed after the trusted package was built.",
+      },
+      { status: 502 },
+    );
+  }
+
+  let current: ReviewPackage;
+  try {
+    current = await buildReviewPackageData(env, target.repository, target.pullRequest);
+  } catch {
+    const unavailable = await publishUnavailableForTarget(
+      env,
+      target,
+      "freshness_recheck_failed",
+    );
+    return json(
+      {
+        ...envelope,
+        publication: unavailable.ok ? unavailable.publication : { state: "FAILED" },
+        freshness: { state: "UNKNOWN" },
+      },
+      { status: 503 },
+    );
+  }
+
+  const freshness = compareReviewFreshness(envelope, current);
+  let body: string;
+  let status: number;
+  if (freshness.state === "STALE_REVIEW") {
+    body = renderStaleReviewComment(envelope, current, freshness);
+    status = 409;
+  } else if (envelope.execution.state === "COMPLETED") {
+    body = renderReviewComment(envelope);
+    status = 200;
+  } else {
+    body = renderReviewUnavailableComment(envelope);
+    status = 503;
+  }
+
+  try {
+    const publication = await publishReviewComment(
+      env,
+      target.repository,
+      target.pullRequest,
+      body,
+    );
+    return json(
+      {
+        ...envelope,
+        freshness,
+        publication,
+      },
+      { status },
+    );
+  } catch {
+    return json(
+      {
+        ...envelope,
+        freshness,
+        publication: { state: "FAILED" },
+        error: "review_publication_failed",
+      },
+      { status: 502 },
+    );
+  }
+}
+
 export async function handleAiReviewRequest(request: Request, env: AiReviewEnv): Promise<Response> {
   const { pathname } = new URL(request.url);
 
@@ -195,7 +337,8 @@ export async function handleAiReviewRequest(request: Request, env: AiReviewEnv):
 
   const privatePostRoute =
     pathname === "/api/v1/ai-review/package" ||
-    pathname === "/api/v1/ai-review/review";
+    pathname === "/api/v1/ai-review/review" ||
+    pathname === "/api/v1/ai-review/publish";
 
   if (privatePostRoute) {
     if (request.method === "OPTIONS") return privateRouteOptions();
@@ -205,9 +348,13 @@ export async function handleAiReviewRequest(request: Request, env: AiReviewEnv):
         { status: 405, headers: { allow: "POST, OPTIONS" } },
       );
     }
-    return pathname === "/api/v1/ai-review/package"
-      ? buildReviewPackageResponse(request, env)
-      : executeReviewResponse(request, env);
+    if (pathname === "/api/v1/ai-review/package") {
+      return buildReviewPackageResponse(request, env);
+    }
+    if (pathname === "/api/v1/ai-review/review") {
+      return executeReviewResponse(request, env);
+    }
+    return executeAndPublishReviewResponse(request, env);
   }
 
   return json({ error: "not_found" }, { status: 404 });
