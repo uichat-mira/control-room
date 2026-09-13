@@ -76,6 +76,28 @@ test("builds one immutable typed CODE_REVIEW package from trusted GitHub sources
       return new Response("diff --git a/a.ts b/a.ts\n+changed\n");
     }
 
+    if (url === "https://api.github.com/graphql") {
+      return Response.json({
+        data: {
+          repository: {
+            pullRequest: {
+              closingIssuesReferences: {
+                nodes: [
+                  {
+                    number: 109,
+                    title: "Pilot Mira Organization AI Review on Mobile",
+                    body: "Trusted issue contract",
+                    updatedAt: "2026-09-11T05:21:02Z",
+                    repository: { nameWithOwner: "uichat-mira/mira-mobile" },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      });
+    }
+
     throw new Error(`Unexpected fetch: ${url}`);
   };
 
@@ -97,10 +119,13 @@ test("builds one immutable typed CODE_REVIEW package from trusted GitHub sources
   assert.equal(pkg.controls.identity.outputContractBlobSha, OUTPUT_BLOB);
   assert.equal(pkg.controls.identity.profileBlobSha, null);
   assert.equal(pkg.controls.identity.rootContractBlobSha, ROOT_BLOB);
-  assert.deepEqual(pkg.controls.identity.taskContract, {
-    state: "unavailable",
-    reason: "trusted_lookup_not_configured",
-  });
+  assert.equal(pkg.controls.taskContract?.repository, "uichat-mira/mira-mobile");
+  assert.equal(pkg.controls.taskContract?.issue, 109);
+  assert.equal(pkg.controls.taskContract?.body, "Trusted issue contract");
+  assert.equal(pkg.controls.identity.taskContract.state, "resolved");
+  if (pkg.controls.identity.taskContract.state !== "resolved") throw new Error("fixture");
+  assert.equal(pkg.controls.identity.taskContract.issue, 109);
+  assert.match(pkg.controls.identity.taskContract.contentSha256, /^[a-f0-9]{64}$/);
   assert.equal(pkg.trust.organizationControlsSource, `uichat-mira/.github@${POLICY_COMMIT}`);
   assert.equal(pkg.trust.repositoryControlsSource, `uichat-mira/mira-mobile@${BASE_SHA}`);
   assert.equal(pkg.diff.source, `${BASE_SHA}...${HEAD_SHA}`);
@@ -111,13 +136,52 @@ test("builds one immutable typed CODE_REVIEW package from trusted GitHub sources
       message: "Missing .ai/review-profile.md at base SHA; repository-specific review rules are not yet migrated.",
       material: true,
     },
-    {
-      code: "trusted_task_contract_unavailable",
-      message: "Trusted Task / PR Contract lookup is not configured; highest-priority task instructions may be unavailable to the reviewer.",
-      material: true,
-    },
   ]);
-  assert.equal(requested.length, 7);
+  assert.equal(requested.length, 8);
+});
+
+test("keeps an explicit material gap when no trusted linked work item exists", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string" ? input : input.url;
+    if (url.endsWith("/repos/uichat-mira/mira-mobile/pulls/108")) {
+      return Response.json({
+        number: 108,
+        title: "Example PR",
+        body: "Closes #999 from untrusted text only",
+        draft: false,
+        user: { login: "builder" },
+        base: { ref: "dev", sha: BASE_SHA, repo: { full_name: "uichat-mira/mira-mobile" } },
+        head: { ref: "feat/example", sha: HEAD_SHA, repo: { full_name: "uichat-mira/mira-mobile" } },
+      });
+    }
+    if (url.endsWith("/repos/uichat-mira/.github/commits/main")) return Response.json({ sha: POLICY_COMMIT });
+    if (url.includes("/contents/ai-review/POLICY.md")) return contentResponse("ai-review/POLICY.md", POLICY_BLOB, "policy");
+    if (url.includes("/contents/ai-review/OUTPUT-CONTRACT.md")) return contentResponse("ai-review/OUTPUT-CONTRACT.md", OUTPUT_BLOB, "output");
+    if (url.includes("/contents/.ai/review-profile.md")) return new Response("not found", { status: 404 });
+    if (url.includes("/contents/AGENTS.md")) return contentResponse("AGENTS.md", ROOT_BLOB, "root");
+    if (url.includes("/compare/")) return new Response("diff");
+    if (url === "https://api.github.com/graphql") {
+      return Response.json({ data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [] } } } } });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const pkg = await buildReviewPackageData(
+    { GITHUB_READ_TOKEN: "test-token" },
+    "uichat-mira/mira-mobile",
+    108,
+  );
+  assert.deepEqual(pkg.controls.identity.taskContract, {
+    state: "unavailable",
+    reason: "no_linked_issue",
+  });
+  assert.ok(pkg.gaps.some((gap) => gap.code === "trusted_task_contract_unavailable"));
 });
 
 test("rejects an out-of-organization repository before any GitHub request", async (t) => {
