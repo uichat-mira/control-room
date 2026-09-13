@@ -206,6 +206,17 @@ export function renderReviewComment(envelope: ReviewExecutionEnvelope) {
   ].join("\n\n"));
 }
 
+function renderAttemptDiagnostics(attempt: ReviewExecutionEnvelope["execution"]["attempts"][number]) {
+  const parts = [
+    attempt.failureClass,
+    attempt.failureDetail,
+    attempt.normalizationReason,
+    attempt.normalizationPath,
+    typeof attempt.upstreamStatus === "number" ? `HTTP ${attempt.upstreamStatus}` : undefined,
+  ].filter((value): value is string => Boolean(value));
+  return parts.length ? ` · ${parts.map(safeInline).join(" · ")}` : "";
+}
+
 export function renderReviewUnavailableComment(envelope: ReviewExecutionEnvelope) {
   if (envelope.execution.state !== "REVIEW_UNAVAILABLE") {
     throw new ReviewPublicationError("Review execution is not unavailable.");
@@ -213,10 +224,10 @@ export function renderReviewUnavailableComment(envelope: ReviewExecutionEnvelope
 
   const attempts = envelope.execution.attempts.length
     ? envelope.execution.attempts
-        .map((attempt) => {
-          const detail = attempt.detail ? ` · ${safeInline(attempt.detail)}` : "";
-          return `- ${safeInline(attempt.role)} / ${safeInline(attempt.provider)} / ${safeInline(attempt.status)}${detail}`;
-        })
+        .map(
+          (attempt) =>
+            `- ${safeInline(attempt.role)} / ${safeInline(attempt.provider)} / ${safeInline(attempt.status)}${renderAttemptDiagnostics(attempt)}`,
+        )
         .join("\n")
     : "- No eligible provider attempt was executed.";
 
