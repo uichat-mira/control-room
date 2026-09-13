@@ -1,9 +1,11 @@
 const GITHUB_API = "https://api.github.com";
+const GITHUB_GRAPHQL = "https://api.github.com/graphql";
 const ORGANIZATION = "uichat-mira";
 const POLICY_REPOSITORY = "uichat-mira/.github";
 const DEFAULT_POLICY_REF = "main";
 const PROFILE_PATH = ".ai/review-profile.md";
 const ROOT_CONTRACT_PATH = "AGENTS.md";
+const MAX_TASK_CONTRACT_CHARS = 50_000;
 
 export const REVIEW_PACKAGE_VERSION = "mira-ai-review-package/v0" as const;
 export const AI_REVIEW_RUNTIME_VERSION = "control-room-ai-review/v0" as const;
@@ -22,10 +24,15 @@ export interface ReviewPackageGap {
   material: boolean;
 }
 
+export type TrustedTaskContractUnavailableReason =
+  | "no_linked_issue"
+  | "multiple_linked_issues"
+  | "linked_issue_too_large";
+
 export type TrustedTaskContractIdentity =
   | {
       state: "unavailable";
-      reason: "trusted_lookup_not_configured";
+      reason: TrustedTaskContractUnavailableReason;
     }
   | {
       state: "resolved";
@@ -34,6 +41,15 @@ export type TrustedTaskContractIdentity =
       updatedAt: string;
       contentSha256: string;
     };
+
+export interface TrustedTaskContract {
+  repository: string;
+  issue: number;
+  title: string;
+  body: string;
+  updatedAt: string;
+  contentSha256: string;
+}
 
 export interface AiReviewPackageEnv {
   GITHUB_READ_TOKEN?: string;
@@ -68,6 +84,29 @@ interface GitHubContentFile {
   sha: string;
   encoding: "base64";
   content: string;
+}
+
+interface GitHubClosingIssue {
+  number: number;
+  title: string;
+  body: string | null;
+  updatedAt: string;
+  repository: { nameWithOwner: string };
+}
+
+interface ClosingIssuesResponse {
+  repository: {
+    pullRequest: {
+      closingIssuesReferences: {
+        nodes: GitHubClosingIssue[];
+      };
+    } | null;
+  } | null;
+}
+
+interface GitHubGraphqlResponse<T> {
+  data?: T;
+  errors?: Array<{ message?: string }>;
 }
 
 export interface TrustedReviewText {
@@ -106,6 +145,7 @@ export interface ReviewPackage {
     outputContract: TrustedReviewText;
     repositoryProfile: TrustedReviewText | null;
     rootContract: TrustedReviewText | null;
+    taskContract: TrustedTaskContract | null;
     identity: {
       policyCommitSha: string;
       policyBlobSha: string;
@@ -168,6 +208,33 @@ async function githubJson<T>(env: AiReviewPackageEnv, path: string): Promise<T> 
   });
   if (!response.ok) throw new Error(githubError(response));
   return response.json() as Promise<T>;
+}
+
+async function githubGraphql<T>(
+  env: AiReviewPackageEnv,
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<T> {
+  const response = await fetch(GITHUB_GRAPHQL, {
+    method: "POST",
+    headers: {
+      ...githubHeaders(env),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!response.ok) throw new Error(githubError(response));
+
+  const result = (await response.json()) as GitHubGraphqlResponse<T>;
+  if (result.errors?.length) {
+    throw new Error(
+      `GitHub GraphQL failed: ${result.errors
+        .map((error) => error.message || "unknown error")
+        .join("; ")}`,
+    );
+  }
+  if (!result.data) throw new Error("GitHub GraphQL response did not contain data.");
+  return result.data;
 }
 
 async function githubText(env: AiReviewPackageEnv, path: string, accept: string) {
@@ -237,6 +304,94 @@ async function trustedFile(
   };
 }
 
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function resolveTrustedTaskContract(
+  env: AiReviewPackageEnv,
+  repository: string,
+  pullRequest: number,
+): Promise<{
+  contract: TrustedTaskContract | null;
+  identity: TrustedTaskContractIdentity;
+}> {
+  const { owner, repo } = repositoryParts(repository);
+  const data = await githubGraphql<ClosingIssuesResponse>(
+    env,
+    `query MiraReviewTaskContract($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+          closingIssuesReferences(first: 10) {
+            nodes {
+              number
+              title
+              body
+              updatedAt
+              repository { nameWithOwner }
+            }
+          }
+        }
+      }
+    }`,
+    { owner, repo, number: pullRequest },
+  );
+
+  const linked = (data.repository?.pullRequest?.closingIssuesReferences.nodes ?? []).filter(
+    (issue) => issue.repository.nameWithOwner === repository,
+  );
+
+  if (linked.length === 0) {
+    return {
+      contract: null,
+      identity: { state: "unavailable", reason: "no_linked_issue" },
+    };
+  }
+
+  if (linked.length !== 1) {
+    return {
+      contract: null,
+      identity: { state: "unavailable", reason: "multiple_linked_issues" },
+    };
+  }
+
+  const issue = linked[0];
+  const body = issue.body ?? "";
+  const canonical = JSON.stringify({
+    repository,
+    issue: issue.number,
+    title: issue.title,
+    body,
+  });
+  if (canonical.length > MAX_TASK_CONTRACT_CHARS) {
+    return {
+      contract: null,
+      identity: { state: "unavailable", reason: "linked_issue_too_large" },
+    };
+  }
+
+  const contentSha256 = await sha256(canonical);
+  const contract: TrustedTaskContract = {
+    repository,
+    issue: issue.number,
+    title: issue.title,
+    body,
+    updatedAt: issue.updatedAt,
+    contentSha256,
+  };
+  return {
+    contract,
+    identity: {
+      state: "resolved",
+      repository,
+      issue: issue.number,
+      updatedAt: issue.updatedAt,
+      contentSha256,
+    },
+  };
+}
+
 function validRepository(repository: string) {
   return /^uichat-mira\/[A-Za-z0-9._-]+$/.test(repository);
 }
@@ -282,10 +437,14 @@ function truncatedDiffGap(): ReviewPackageGap {
   };
 }
 
-function unavailableTaskContractGap(): ReviewPackageGap {
+function unavailableTaskContractGap(identity: TrustedTaskContractIdentity): ReviewPackageGap {
+  const detail =
+    identity.state === "unavailable"
+      ? identity.reason
+      : "unknown";
   return {
     code: "trusted_task_contract_unavailable",
-    message: "Trusted Task / PR Contract lookup is not configured; highest-priority task instructions may be unavailable to the reviewer.",
+    message: `Trusted Task / PR Contract is unavailable (${detail}); highest-priority task instructions may be unavailable to the reviewer.`,
     material: true,
   };
 }
@@ -325,7 +484,7 @@ export async function buildReviewPackageData(
   const requestedPolicyRef = env.AI_REVIEW_POLICY_REF?.trim() || DEFAULT_POLICY_REF;
   const policyCommitSha = await resolveCommitSha(env, POLICY_REPOSITORY, requestedPolicyRef);
 
-  const [policy, outputContract, profile, rootContract, rawDiff] = await Promise.all([
+  const [policy, outputContract, profile, rootContract, rawDiff, task] = await Promise.all([
     trustedFile(
       env,
       POLICY_REPOSITORY,
@@ -349,6 +508,7 @@ export async function buildReviewPackageData(
       `/repos/${ORGANIZATION}/${encodeURIComponent(repo)}/compare/${encodeURIComponent(pr.base.sha)}...${encodeURIComponent(pr.head.sha)}`,
       "application/vnd.github.v3.diff",
     ),
+    resolveTrustedTaskContract(env, repository, pullRequest),
   ]);
 
   if (!policy || !outputContract) {
@@ -357,10 +517,6 @@ export async function buildReviewPackageData(
 
   const diffTruncated = rawDiff.length > MAX_REVIEW_DIFF_CHARS;
   const diff = diffTruncated ? rawDiff.slice(0, MAX_REVIEW_DIFF_CHARS) : rawDiff;
-  const taskContract: TrustedTaskContractIdentity = {
-    state: "unavailable",
-    reason: "trusted_lookup_not_configured",
-  };
 
   return {
     packageVersion: REVIEW_PACKAGE_VERSION,
@@ -389,13 +545,14 @@ export async function buildReviewPackageData(
       outputContract,
       repositoryProfile: profile,
       rootContract,
+      taskContract: task.contract,
       identity: {
         policyCommitSha,
         policyBlobSha: policy.blobSha,
         outputContractBlobSha: outputContract.blobSha,
         profileBlobSha: profile?.blobSha ?? null,
         rootContractBlobSha: rootContract?.blobSha ?? null,
-        taskContract,
+        taskContract: task.identity,
       },
     },
     diff: {
@@ -409,7 +566,7 @@ export async function buildReviewPackageData(
     gaps: [
       ...(profile ? [] : [missingProfileGap()]),
       ...(diffTruncated ? [truncatedDiffGap()] : []),
-      ...(taskContract.state === "unavailable" ? [unavailableTaskContractGap()] : []),
+      ...(task.identity.state === "unavailable" ? [unavailableTaskContractGap(task.identity)] : []),
     ],
   };
 }

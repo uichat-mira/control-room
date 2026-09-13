@@ -63,6 +63,17 @@ function mockGitHub(headRef: string, baseRef: string) {
     if (url.includes(`/repos/uichat-mira/example/compare/${BASE_SHA}...${HEAD_SHA}`)) {
       return new Response("diff --git a/a b/a\n+change\n");
     }
+    if (url === "https://api.github.com/graphql") {
+      return Response.json({
+        data: {
+          repository: {
+            pullRequest: {
+              closingIssuesReferences: { nodes: [] },
+            },
+          },
+        },
+      });
+    }
     throw new Error(`Unexpected fetch: ${url}`);
   };
 }

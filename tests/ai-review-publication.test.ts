@@ -11,7 +11,10 @@ import {
   MIRA_REVIEW_MARKER,
   ReviewPublicationError,
   compareReviewFreshness,
+  publishReviewComment,
   renderReviewComment,
+  renderReviewUnavailableComment,
+  renderStaleReviewComment,
 } from "../src/ai-review-publication.ts";
 
 function reviewPackage(): ReviewPackage {
@@ -56,6 +59,7 @@ function reviewPackage(): ReviewPackage {
       },
       repositoryProfile: null,
       rootContract: null,
+      taskContract: null,
       identity: {
         policyCommitSha: "3333333333333333333333333333333333333333",
         policyBlobSha: "4444444444444444444444444444444444444444",
@@ -64,7 +68,7 @@ function reviewPackage(): ReviewPackage {
         rootContractBlobSha: null,
         taskContract: {
           state: "unavailable",
-          reason: "trusted_lookup_not_configured",
+          reason: "no_linked_issue",
         },
       },
     },
@@ -105,7 +109,7 @@ function completedEnvelope(
       rootContractBlobSha: null,
       taskContract: {
         state: "unavailable",
-        reason: "trusted_lookup_not_configured",
+        reason: "no_linked_issue",
       },
     },
     providerRoute: {
@@ -167,7 +171,7 @@ test("renders the Organization marker exactly once with every required logical s
   assert.match(body, /### Review metadata/);
   assert.match(body, /CODE_REVIEW/);
   assert.match(body, /Trusted Task \/ PR contract/);
-  assert.match(body, /trusted_lookup_not_configured/);
+  assert.match(body, /no_linked_issue/);
   assert.match(body, /minimax-cn-codeplan\/m3/);
   assert.match(body, /MiniMax-M3/);
   assert.match(body, /mira-ai-review-output\/v1/);
@@ -264,6 +268,7 @@ test("refuses to render REVIEW_UNAVAILABLE as a current review comment", () => {
   });
 
   assert.throws(() => renderReviewComment(envelope), ReviewPublicationError);
+  assert.match(renderReviewUnavailableComment(envelope), /`REVIEW_UNAVAILABLE`/);
 });
 
 test("fails closed instead of truncating an oversized normalized review comment", () => {
@@ -320,10 +325,13 @@ test("marks changed PR or actual trusted-control content as STALE_REVIEW", () =>
   current.controls.identity.policyBlobSha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   current.controls.identity.profileBlobSha = "cccccccccccccccccccccccccccccccccccccccc";
 
-  assert.deepEqual(compareReviewFreshness(completedEnvelope(), current), {
+  const freshness = compareReviewFreshness(completedEnvelope(), current);
+  assert.deepEqual(freshness, {
     state: "STALE_REVIEW",
     reasons: ["head_sha", "policy_blob", "profile_blob"],
   });
+  if (freshness.state !== "STALE_REVIEW") throw new Error("fixture");
+  assert.match(renderStaleReviewComment(completedEnvelope(), current, freshness), /`STALE_REVIEW`/);
 });
 
 test("marks review mode changes as STALE_REVIEW", () => {
@@ -350,6 +358,55 @@ test("marks trusted Task / PR Contract identity changes as STALE_REVIEW", () => 
     state: "STALE_REVIEW",
     reasons: ["task_contract"],
   });
+});
+
+test("creates then updates one Mira-owned sticky review comment", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let existing = false;
+  const methods: string[] = [];
+
+  globalThis.fetch = async (input, init = {}) => {
+    const url = typeof input === "string" ? input : input.url;
+    const method = init.method || "GET";
+    methods.push(`${method} ${url}`);
+    if (url.endsWith("/user")) return Response.json({ login: "publisher" });
+    if (url.includes("/issues/7/comments?per_page=100")) {
+      return Response.json(
+        existing
+          ? [{ id: 41, body: `${MIRA_REVIEW_MARKER}\nold`, user: { login: "publisher" } }]
+          : [],
+      );
+    }
+    if (url.endsWith("/issues/7/comments") && method === "POST") {
+      existing = true;
+      return Response.json({ id: 41, body: JSON.parse(String(init.body)).body, user: { login: "publisher" } });
+    }
+    if (url.endsWith("/issues/comments/41") && method === "PATCH") {
+      return Response.json({ id: 41, body: JSON.parse(String(init.body)).body, user: { login: "publisher" } });
+    }
+    throw new Error(`Unexpected fetch: ${method} ${url}`);
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const created = await publishReviewComment(
+    { GITHUB_PUBLISH_TOKEN: "secret" },
+    "uichat-mira/mira-mobile",
+    7,
+    `${MIRA_REVIEW_MARKER}\nfirst`,
+  );
+  const updated = await publishReviewComment(
+    { GITHUB_PUBLISH_TOKEN: "secret" },
+    "uichat-mira/mira-mobile",
+    7,
+    `${MIRA_REVIEW_MARKER}\nsecond`,
+  );
+
+  assert.equal(created.state, "CREATED");
+  assert.equal(updated.state, "UPDATED");
+  assert.ok(methods.some((entry) => entry.startsWith("POST ")));
+  assert.ok(methods.some((entry) => entry.startsWith("PATCH ")));
 });
 
 test("runtime preserves deterministic gaps and promotes an invalid clean verdict", async (t) => {
@@ -385,7 +442,7 @@ test("runtime preserves deterministic gaps and promotes an invalid clean verdict
   assert.equal(result.identity.reviewMode, "CODE_REVIEW");
   assert.deepEqual(result.identity.taskContract, {
     state: "unavailable",
-    reason: "trusted_lookup_not_configured",
+    reason: "no_linked_issue",
   });
   assert.equal(result.providerRoute.routine.provider, "minimax-cn-codeplan");
   assert.equal(result.providerRoute.routine.state, "configured");
