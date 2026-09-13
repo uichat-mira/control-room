@@ -1,0 +1,75 @@
+name: AI Review Publisher Token Probe
+
+on:
+  push:
+    branches:
+      - prod
+    paths:
+      - '.github/workflows/ai-review-publisher-token-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+    steps:
+      - name: Probe existing Organization GitHub token
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ORG_GITHUB_TOKEN:-}"
+
+          headers=(-H "Authorization: Bearer ${ORG_GITHUB_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28')
+
+          curl --fail --silent --show-error -D /tmp/user-headers.txt \
+            "${headers[@]}" \
+            https://api.github.com/user \
+            --output /tmp/user.json
+
+          publisher_login="$(node -e "const fs=require('fs');const x=JSON.parse(fs.readFileSync('/tmp/user.json','utf8'));process.stdout.write(x.login||'')")"
+          test -n "$publisher_login"
+          echo "Authenticated publisher identity: ${publisher_login}"
+          scopes="$(grep -i '^x-oauth-scopes:' /tmp/user-headers.txt | sed -E 's/^x-oauth-scopes:[[:space:]]*//I' | tr -d '\r' || true)"
+          echo "Reported OAuth scopes: ${scopes:-not-reported}"
+
+          cat > /tmp/create-comment.json <<'JSON'
+          {"body":"<!-- mira-ai-review:publisher-token-probe -->\nTemporary capability probe. This comment will be removed automatically in the same job."}
+          JSON
+
+          curl --fail --silent --show-error \
+            "${headers[@]}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            --data @/tmp/create-comment.json \
+            https://api.github.com/repos/uichat-mira/mira-mobile/issues/109/comments \
+            --output /tmp/comment.json
+
+          comment_id="$(node -e "const fs=require('fs');const x=JSON.parse(fs.readFileSync('/tmp/comment.json','utf8'));process.stdout.write(String(x.id||''))")"
+          test -n "$comment_id"
+          echo "Create comment: success"
+
+          cat > /tmp/update-comment.json <<'JSON'
+          {"body":"<!-- mira-ai-review:publisher-token-probe -->\nTemporary capability probe update succeeded. This comment will now be removed automatically."}
+          JSON
+
+          curl --fail --silent --show-error \
+            "${headers[@]}" \
+            -H 'Content-Type: application/json' \
+            -X PATCH \
+            --data @/tmp/update-comment.json \
+            "https://api.github.com/repos/uichat-mira/mira-mobile/issues/comments/${comment_id}" \
+            --output /tmp/updated-comment.json
+          echo "Update comment: success"
+
+          curl --fail --silent --show-error \
+            "${headers[@]}" \
+            -X DELETE \
+            "https://api.github.com/repos/uichat-mira/mira-mobile/issues/comments/${comment_id}"
+          echo "Delete comment: success"
+
+          rm -f /tmp/user-headers.txt /tmp/user.json /tmp/create-comment.json /tmp/comment.json /tmp/update-comment.json /tmp/updated-comment.json
