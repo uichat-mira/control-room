@@ -14,9 +14,15 @@ import type {
   ReviewFinding,
 } from "./ai-review-runtime.ts";
 
+const GITHUB_API = "https://api.github.com";
 export const MIRA_REVIEW_MARKER = "<!-- mira-ai-review:v1 -->" as const;
 export const REVIEW_OUTPUT_CONTRACT_VERSION = "mira-ai-review-output/v1" as const;
 export const MAX_REVIEW_COMMENT_BYTES = 60_000;
+export const PUBLISH_PILOT_REPOSITORY = "uichat-mira/mira-mobile" as const;
+
+export interface AiReviewPublicationEnv {
+  GITHUB_PUBLISH_TOKEN?: string;
+}
 
 export type ReviewStaleReason =
   | "repository"
@@ -33,6 +39,23 @@ export type ReviewStaleReason =
 export type ReviewFreshness =
   | { state: "CURRENT"; reasons: [] }
   | { state: "STALE_REVIEW"; reasons: ReviewStaleReason[] };
+
+export interface ReviewPublicationResult {
+  state: "CREATED" | "UPDATED";
+  commentId: number;
+  publisher: string;
+  removedDuplicates: number;
+}
+
+interface GitHubUser {
+  login: string;
+}
+
+interface GitHubIssueComment {
+  id: number;
+  body: string | null;
+  user: { login: string };
+}
 
 export class ReviewPublicationError extends Error {
   constructor(message: string) {
@@ -118,6 +141,37 @@ function renderConflict(detail: ContractConflictDetail | undefined) {
   ].join("\n");
 }
 
+function ensureCommentSize(body: string) {
+  const bodyBytes = new TextEncoder().encode(body).byteLength;
+  if (bodyBytes > MAX_REVIEW_COMMENT_BYTES) {
+    throw new ReviewPublicationError(
+      `Rendered review exceeds the ${MAX_REVIEW_COMMENT_BYTES}-byte publication limit.`,
+    );
+  }
+  return body;
+}
+
+function renderIdentityMetadata(envelope: ReviewExecutionEnvelope) {
+  return [
+    "### Review metadata",
+    `- **Repository:** ${safeInline(envelope.identity.repository)}`,
+    `- **Pull request:** #${envelope.identity.pullRequest}`,
+    `- **Review mode:** ${envelope.identity.reviewMode}`,
+    `- **Base SHA:** ${safeInline(envelope.identity.baseSha)}`,
+    `- **Head SHA:** ${safeInline(envelope.identity.headSha)}`,
+    `- **Trusted Task / PR contract:** ${renderTaskContract(envelope.identity.taskContract)}`,
+    `- **Organization policy commit:** ${safeInline(envelope.identity.policyCommitSha)}`,
+    `- **Organization policy blob:** ${safeInline(envelope.identity.policyBlobSha)}`,
+    `- **Output contract:** ${REVIEW_OUTPUT_CONTRACT_VERSION} / ${safeInline(envelope.identity.outputContractBlobSha)}`,
+    `- **Repository profile blob:** ${safeIdentity(envelope.identity.profileBlobSha)}`,
+    `- **Root contract blob:** ${safeIdentity(envelope.identity.rootContractBlobSha)}`,
+    `- **Runtime:** ${AI_REVIEW_RUNTIME_VERSION}`,
+    `- **Package:** ${REVIEW_PACKAGE_VERSION}`,
+    `- **Execution:** ${REVIEW_EXECUTION_VERSION}`,
+    `- **Executed at:** ${safeInline(envelope.executedAt)}`,
+  ].join("\n");
+}
+
 export function renderReviewComment(envelope: ReviewExecutionEnvelope) {
   if (envelope.execution.state !== "COMPLETED") {
     throw new ReviewPublicationError(
@@ -136,44 +190,83 @@ export function renderReviewComment(envelope: ReviewExecutionEnvelope) {
   ].join("\n\n");
 
   const metadataSection = [
-    "### Review metadata",
-    `- **Repository:** ${safeInline(envelope.identity.repository)}`,
-    `- **Pull request:** #${envelope.identity.pullRequest}`,
-    `- **Review mode:** ${envelope.identity.reviewMode}`,
-    `- **Base SHA:** ${safeInline(envelope.identity.baseSha)}`,
-    `- **Head SHA:** ${safeInline(envelope.identity.headSha)}`,
-    `- **Trusted Task / PR contract:** ${renderTaskContract(envelope.identity.taskContract)}`,
+    renderIdentityMetadata(envelope),
     `- **Provider:** ${safeInline(provider.id)}`,
     `- **Provider role:** ${safeInline(provider.role)}`,
     `- **Model:** ${safeInline(provider.model)}`,
-    `- **Organization policy commit:** ${safeInline(envelope.identity.policyCommitSha)}`,
-    `- **Organization policy blob:** ${safeInline(envelope.identity.policyBlobSha)}`,
-    `- **Output contract:** ${REVIEW_OUTPUT_CONTRACT_VERSION} / ${safeInline(envelope.identity.outputContractBlobSha)}`,
-    `- **Repository profile blob:** ${safeIdentity(envelope.identity.profileBlobSha)}`,
-    `- **Root contract blob:** ${safeIdentity(envelope.identity.rootContractBlobSha)}`,
-    `- **Runtime:** ${AI_REVIEW_RUNTIME_VERSION}`,
-    `- **Package:** ${REVIEW_PACKAGE_VERSION}`,
-    `- **Execution:** ${REVIEW_EXECUTION_VERSION}`,
-    `- **Executed at:** ${safeInline(envelope.executedAt)}`,
   ].join("\n");
 
-  const body = [
+  return ensureCommentSize([
     MIRA_REVIEW_MARKER,
     "## Mira AI Review",
     verdictSection,
     ["### Findings", renderFindings(review)].join("\n\n"),
     ["### Validation gaps", renderValidationGaps(review)].join("\n\n"),
     metadataSection,
-  ].join("\n\n");
+  ].join("\n\n"));
+}
 
-  const bodyBytes = new TextEncoder().encode(body).byteLength;
-  if (bodyBytes > MAX_REVIEW_COMMENT_BYTES) {
-    throw new ReviewPublicationError(
-      `Rendered review exceeds the ${MAX_REVIEW_COMMENT_BYTES}-byte publication limit.`,
-    );
+export function renderReviewUnavailableComment(envelope: ReviewExecutionEnvelope) {
+  if (envelope.execution.state !== "REVIEW_UNAVAILABLE") {
+    throw new ReviewPublicationError("Review execution is not unavailable.");
   }
 
-  return body;
+  const attempts = envelope.execution.attempts.length
+    ? envelope.execution.attempts
+        .map((attempt) => {
+          const detail = attempt.detail ? ` · ${safeInline(attempt.detail)}` : "";
+          return `- ${safeInline(attempt.role)} / ${safeInline(attempt.provider)} / ${safeInline(attempt.status)}${detail}`;
+        })
+        .join("\n")
+    : "- No eligible provider attempt was executed.";
+
+  return ensureCommentSize([
+    MIRA_REVIEW_MARKER,
+    "## Mira AI Review",
+    "### Status",
+    "`REVIEW_UNAVAILABLE`",
+    `- **Reason:** ${safeInline(envelope.execution.reason)}`,
+    "- No clean or blocking verdict is current while review execution is unavailable.",
+    "### Provider attempts",
+    attempts,
+    renderIdentityMetadata(envelope),
+  ].join("\n\n"));
+}
+
+export function renderStaleReviewComment(
+  envelope: ReviewExecutionEnvelope,
+  current: ReviewPackage,
+  freshness: Extract<ReviewFreshness, { state: "STALE_REVIEW" }>,
+) {
+  return ensureCommentSize([
+    MIRA_REVIEW_MARKER,
+    "## Mira AI Review",
+    "### Status",
+    "`STALE_REVIEW`",
+    `- **Changed identity:** ${freshness.reasons.map(safeInline).join(", ")}`,
+    `- **Reviewed head:** ${safeInline(envelope.identity.headSha)}`,
+    `- **Current head:** ${safeInline(current.pullRequest.head.sha)}`,
+    `- **Current base:** ${safeInline(current.pullRequest.base.sha)}`,
+    "- The previous verdict is not current. A new review is required for the current identity.",
+    renderIdentityMetadata(envelope),
+  ].join("\n\n"));
+}
+
+export function renderPublicationUnavailableComment(
+  repository: string,
+  pullRequest: number,
+  reason: string,
+) {
+  return ensureCommentSize([
+    MIRA_REVIEW_MARKER,
+    "## Mira AI Review",
+    "### Status",
+    "`REVIEW_UNAVAILABLE`",
+    `- **Repository:** ${safeInline(repository)}`,
+    `- **Pull request:** #${pullRequest}`,
+    `- **Reason:** ${safeInline(reason)}`,
+    "- No earlier Mira verdict should be treated as current until freshness can be re-established.",
+  ].join("\n\n"));
 }
 
 export function compareReviewFreshness(
@@ -203,4 +296,107 @@ export function compareReviewFreshness(
   return reasons.length === 0
     ? { state: "CURRENT", reasons: [] }
     : { state: "STALE_REVIEW", reasons };
+}
+
+function publicationHeaders(env: AiReviewPublicationEnv) {
+  const token = env.GITHUB_PUBLISH_TOKEN?.trim();
+  if (!token) throw new ReviewPublicationError("GITHUB_PUBLISH_TOKEN is required.");
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+    "User-Agent": "uichat-mira-control-room-ai-review-publisher",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+}
+
+async function publicationJson<T>(
+  env: AiReviewPublicationEnv,
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const response = await fetch(`${GITHUB_API}${path}`, {
+    ...init,
+    headers: {
+      ...publicationHeaders(env),
+      ...(init.headers || {}),
+    },
+  });
+  if (!response.ok) {
+    throw new ReviewPublicationError(`GitHub publication failed with HTTP ${response.status}.`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function deletePublicationComment(
+  env: AiReviewPublicationEnv,
+  repository: string,
+  commentId: number,
+) {
+  const response = await fetch(
+    `${GITHUB_API}/repos/${repository}/issues/comments/${commentId}`,
+    { method: "DELETE", headers: publicationHeaders(env) },
+  );
+  if (!response.ok && response.status !== 404) {
+    throw new ReviewPublicationError(
+      `GitHub duplicate review cleanup failed with HTTP ${response.status}.`,
+    );
+  }
+}
+
+export async function publishReviewComment(
+  env: AiReviewPublicationEnv,
+  repository: string,
+  pullRequest: number,
+  body: string,
+): Promise<ReviewPublicationResult> {
+  if (repository !== PUBLISH_PILOT_REPOSITORY) {
+    throw new ReviewPublicationError(
+      `AI Review publication is limited to ${PUBLISH_PILOT_REPOSITORY} during the V1 pilot.`,
+    );
+  }
+  ensureCommentSize(body);
+
+  const publisher = await publicationJson<GitHubUser>(env, "/user");
+  const comments = await publicationJson<GitHubIssueComment[]>(
+    env,
+    `/repos/${repository}/issues/${pullRequest}/comments?per_page=100`,
+  );
+  const owned = comments
+    .filter(
+      (comment) =>
+        comment.user.login === publisher.login &&
+        (comment.body || "").includes(MIRA_REVIEW_MARKER),
+    )
+    .sort((left, right) => left.id - right.id);
+
+  let state: ReviewPublicationResult["state"];
+  let canonical: GitHubIssueComment;
+  if (owned.length === 0) {
+    canonical = await publicationJson<GitHubIssueComment>(
+      env,
+      `/repos/${repository}/issues/${pullRequest}/comments`,
+      { method: "POST", body: JSON.stringify({ body }) },
+    );
+    state = "CREATED";
+  } else {
+    canonical = await publicationJson<GitHubIssueComment>(
+      env,
+      `/repos/${repository}/issues/comments/${owned[0].id}`,
+      { method: "PATCH", body: JSON.stringify({ body }) },
+    );
+    state = "UPDATED";
+  }
+
+  const duplicates = owned.slice(1);
+  for (const duplicate of duplicates) {
+    await deletePublicationComment(env, repository, duplicate.id);
+  }
+
+  return {
+    state,
+    commentId: canonical.id,
+    publisher: publisher.login,
+    removedDuplicates: duplicates.length,
+  };
 }
