@@ -53,7 +53,7 @@ jobs:
           if (health.executionVersion !== 'mira-ai-review-execution/v0') {
             throw new Error(`Unexpected execution version: ${health.executionVersion}`);
           }
-          if (health.mode !== 'review-execution-unpublished') {
+          if (health.mode !== 'review-publication-pilot') {
             throw new Error(`Unexpected gateway mode: ${health.mode}`);
           }
           if (health.github !== 'configured') {
@@ -61,6 +61,12 @@ jobs:
           }
           if (health.callerAuth !== 'configured') {
             throw new Error(`Purpose-specific AI Review caller auth is not configured: ${health.callerAuth}`);
+          }
+          if (health.publisherAuth !== 'configured') {
+            throw new Error(`AI Review publisher auth is not configured: ${health.publisherAuth}`);
+          }
+          if (health.publisherRepository !== 'uichat-mira/mira-mobile') {
+            throw new Error(`Unexpected pilot publisher repository: ${health.publisherRepository}`);
           }
           if (!health.policyRef) throw new Error('Organization policy ref is missing');
           for (const mode of ['CODE_REVIEW', 'PROMOTION_REVIEW', 'RELEASE_REVIEW']) {
@@ -78,7 +84,7 @@ jobs:
 
           const code = health.providerRoutes.CODE_REVIEW;
           console.log(
-            `AI Review Gateway smoke OK: runtime=${health.runtimeVersion}, mode=${health.mode}, callerAuth=${health.callerAuth}, CODE_REVIEW routine=${code.routine.provider}/${code.routine.model}:${code.routine.state}, fallback=${code.fallback?.provider}/${code.fallback?.model}:${code.fallback?.state}, escalation=${code.escalation?.provider}/${code.escalation?.model}:${code.escalation?.state}`,
+            `AI Review Gateway smoke OK: runtime=${health.runtimeVersion}, mode=${health.mode}, callerAuth=${health.callerAuth}, publisherAuth=${health.publisherAuth}, CODE_REVIEW routine=${code.routine.provider}/${code.routine.model}:${code.routine.state}, fallback=${code.fallback?.provider}/${code.fallback?.model}:${code.fallback?.state}, escalation=${code.escalation?.provider}/${code.escalation?.model}:${code.escalation?.state}`,
           );
           NODE
 
