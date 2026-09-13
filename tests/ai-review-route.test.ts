@@ -59,6 +59,17 @@ function mockPackageGitHub() {
     if (url.includes(`/repos/uichat-mira/example/compare/${BASE_SHA}...${HEAD_SHA}`)) {
       return new Response("diff --git a/a b/a\n+change\n");
     }
+    if (url === "https://api.github.com/graphql") {
+      return Response.json({
+        data: {
+          repository: {
+            pullRequest: {
+              closingIssuesReferences: { nodes: [] },
+            },
+          },
+        },
+      });
+    }
     throw new Error(`Unexpected fetch: ${url}`);
   };
 }
@@ -151,6 +162,7 @@ test("health exposes credential state and route activation separately without pr
 
   assert.equal(response.status, 200);
   assert.equal(body.mode, "review-execution-unpublished");
+  assert.equal(body.publisherAuth, "unconfigured");
   assert.equal(body.executionVersion, "mira-ai-review-execution/v0");
   assert.deepEqual(body.providerRoutes.CODE_REVIEW.routine, {
     state: "configured",
