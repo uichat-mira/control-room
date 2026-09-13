@@ -51,18 +51,22 @@ test("forwards only modeled provider-account credentials into review runtime env
   assert.equal("AI_REVIEW_FALLBACK_API_KEY" in result, false);
 });
 
-test("does not pass unrelated future GitHub write credentials into review runtime env", () => {
+test("forwards only the modeled publisher credential and keeps it distinct from caller and read auth", () => {
   const source = {
     GITHUB_READ_TOKEN: "github-read-token",
     AI_REVIEW_GATEWAY_TOKEN: "caller-token",
-    GITHUB_PUBLISH_TOKEN: "future-write-token",
-  } as AiReviewEnv & { GITHUB_PUBLISH_TOKEN: string };
+    GITHUB_PUBLISH_TOKEN: "publisher-token",
+    GITHUB_ADMIN_TOKEN: "unrelated-admin-token",
+  } as AiReviewEnv & { GITHUB_ADMIN_TOKEN: string };
 
   const result = sharedAiReviewEnv(source) as AiReviewEnv & {
-    GITHUB_PUBLISH_TOKEN?: string;
+    GITHUB_ADMIN_TOKEN?: string;
   };
 
+  assert.equal(result.GITHUB_READ_TOKEN, "github-read-token");
   assert.equal(result.AI_REVIEW_GATEWAY_TOKEN, "caller-token");
-  assert.equal("GITHUB_PUBLISH_TOKEN" in result, false);
-  assert.equal(result.GITHUB_PUBLISH_TOKEN, undefined);
+  assert.equal(result.GITHUB_PUBLISH_TOKEN, "publisher-token");
+  assert.notEqual(result.GITHUB_PUBLISH_TOKEN, result.GITHUB_READ_TOKEN);
+  assert.notEqual(result.GITHUB_PUBLISH_TOKEN, result.AI_REVIEW_GATEWAY_TOKEN);
+  assert.equal("GITHUB_ADMIN_TOKEN" in result, false);
 });
