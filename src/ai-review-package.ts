@@ -6,6 +6,9 @@ const DEFAULT_POLICY_REF = "main";
 const PROFILE_PATH = ".ai/review-profile.md";
 const ROOT_CONTRACT_PATH = "AGENTS.md";
 const MAX_TASK_CONTRACT_CHARS = 50_000;
+const DESKTOP_REPOSITORY = "uichat-mira/mira-desktop";
+const DESKTOP_WORK_BRANCH = /^(feat|feature|fix|hotfix|refactor|perf|docs|test|chore)\/[a-z0-9][a-z0-9._-]*$/;
+const DESKTOP_HOTFIX_BRANCH = /^hotfix\/[a-z0-9][a-z0-9._-]*$/;
 
 export const REVIEW_PACKAGE_VERSION = "mira-ai-review-package/v0" as const;
 export const AI_REVIEW_RUNTIME_VERSION = "control-room-ai-review/v0" as const;
@@ -409,15 +412,22 @@ function validateReviewTarget(repository: string, pullRequest: number) {
   }
 }
 
-function reviewModeFor(pr: GitHubPullRequest): ReviewMode {
-  if (pr.base.ref === "dev" && pr.head.ref.startsWith("feat/")) return "CODE_REVIEW";
-  if (pr.base.ref === "test" && pr.head.ref === "dev") return "PROMOTION_REVIEW";
-  if (pr.base.ref === "prod" && pr.head.ref === "test") return "RELEASE_REVIEW";
+export function reviewModeFor(repository: string, headRef: string, baseRef: string): ReviewMode {
+  if (repository === DESKTOP_REPOSITORY) {
+    if (baseRef === "dev" && DESKTOP_WORK_BRANCH.test(headRef)) return "CODE_REVIEW";
+    if ((baseRef === "test" || baseRef === "prod") && DESKTOP_HOTFIX_BRANCH.test(headRef)) {
+      return "CODE_REVIEW";
+    }
+  }
+
+  if (baseRef === "dev" && headRef.startsWith("feat/")) return "CODE_REVIEW";
+  if (baseRef === "test" && headRef === "dev") return "PROMOTION_REVIEW";
+  if (baseRef === "prod" && headRef === "test") return "RELEASE_REVIEW";
 
   throw new ReviewPackageError(
     "unsupported_review_mode",
     409,
-    `Unsupported review branch transition: ${pr.head.ref} -> ${pr.base.ref}.`,
+    `Unsupported review branch transition: ${headRef} -> ${baseRef}.`,
   );
 }
 
@@ -477,7 +487,7 @@ export async function buildReviewPackageData(
     );
   }
 
-  const reviewMode = reviewModeFor(pr);
+  const reviewMode = reviewModeFor(repository, pr.head.ref, pr.base.ref);
 
   // Resolve every mutable control ref before reading any trusted Organization file.
   // PR base/head are already immutable commit SHAs from the GitHub PR object.

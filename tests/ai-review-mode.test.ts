@@ -5,6 +5,7 @@ import { Buffer } from "node:buffer";
 import {
   ReviewPackageError,
   buildReviewPackageData,
+  reviewModeFor,
   type ReviewMode,
 } from "../src/ai-review-package.ts";
 
@@ -103,6 +104,37 @@ test("maps dev -> test to PROMOTION_REVIEW", async (t) => {
 
 test("maps test -> prod to RELEASE_REVIEW", async (t) => {
   await expectMode("test", "prod", "RELEASE_REVIEW", t);
+});
+
+test("maps Desktop work branches into dev to CODE_REVIEW", () => {
+  for (const prefix of ["feat", "feature", "fix", "hotfix", "refactor", "perf", "docs", "test", "chore"]) {
+    assert.equal(
+      reviewModeFor("uichat-mira/mira-desktop", `${prefix}/example`, "dev"),
+      "CODE_REVIEW",
+    );
+  }
+});
+
+test("maps Desktop direct hotfix transitions to CODE_REVIEW", () => {
+  assert.equal(
+    reviewModeFor("uichat-mira/mira-desktop", "hotfix/example", "test"),
+    "CODE_REVIEW",
+  );
+  assert.equal(
+    reviewModeFor("uichat-mira/mira-desktop", "hotfix/example", "prod"),
+    "CODE_REVIEW",
+  );
+});
+
+test("does not widen non-Desktop work-branch behavior", () => {
+  assert.throws(
+    () => reviewModeFor("uichat-mira/mira-mobile", "docs/example", "dev"),
+    (error: unknown) => {
+      assert.ok(error instanceof ReviewPackageError);
+      assert.equal(error.code, "unsupported_review_mode");
+      return true;
+    },
+  );
 });
 
 test("rejects unsupported branch transitions instead of guessing a review mode", async (t) => {
