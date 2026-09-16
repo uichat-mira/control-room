@@ -107,6 +107,18 @@ interface ClosingIssuesResponse {
   } | null;
 }
 
+interface LinkedBranchIssueResponse {
+  repository: {
+    issue: (GitHubClosingIssue & {
+      linkedBranches: {
+        nodes: Array<{
+          ref: { name: string } | null;
+        }>;
+      };
+    }) | null;
+  } | null;
+}
+
 interface GitHubGraphqlResponse<T> {
   data?: T;
   errors?: Array<{ message?: string }>;
@@ -312,18 +324,22 @@ async function sha256(value: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function resolveTrustedTaskContract(
+export function issueNumberHintFromHeadRef(headRef: string): number | null {
+  const match = /^[A-Za-z0-9._-]+\/([1-9]\d*)(?:[-/].*)?$/.exec(headRef);
+  if (!match) return null;
+  const issue = Number(match[1]);
+  return Number.isSafeInteger(issue) ? issue : null;
+}
+
+async function closingIssuesForPullRequest(
   env: AiReviewPackageEnv,
   repository: string,
   pullRequest: number,
-): Promise<{
-  contract: TrustedTaskContract | null;
-  identity: TrustedTaskContractIdentity;
-}> {
+): Promise<GitHubClosingIssue[]> {
   const { owner, repo } = repositoryParts(repository);
   const data = await githubGraphql<ClosingIssuesResponse>(
     env,
-    `query MiraReviewTaskContract($owner: String!, $repo: String!, $number: Int!) {
+    `query MiraReviewClosingIssues($owner: String!, $repo: String!, $number: Int!) {
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $number) {
           closingIssuesReferences(first: 10) {
@@ -341,25 +357,62 @@ async function resolveTrustedTaskContract(
     { owner, repo, number: pullRequest },
   );
 
-  const linked = (data.repository?.pullRequest?.closingIssuesReferences.nodes ?? []).filter(
+  return (data.repository?.pullRequest?.closingIssuesReferences.nodes ?? []).filter(
     (issue) => issue.repository.nameWithOwner === repository,
   );
+}
 
-  if (linked.length === 0) {
-    return {
-      contract: null,
-      identity: { state: "unavailable", reason: "no_linked_issue" },
-    };
-  }
+async function linkedBranchIssueForHead(
+  env: AiReviewPackageEnv,
+  repository: string,
+  headRef: string,
+): Promise<GitHubClosingIssue | null> {
+  const issueNumber = issueNumberHintFromHeadRef(headRef);
+  if (!issueNumber) return null;
 
-  if (linked.length !== 1) {
-    return {
-      contract: null,
-      identity: { state: "unavailable", reason: "multiple_linked_issues" },
-    };
-  }
+  const { owner, repo } = repositoryParts(repository);
+  const data = await githubGraphql<LinkedBranchIssueResponse>(
+    env,
+    `query MiraReviewLinkedBranchIssue($owner: String!, $repo: String!, $issue: Int!) {
+      repository(owner: $owner, name: $repo) {
+        issue(number: $issue) {
+          number
+          title
+          body
+          updatedAt
+          repository { nameWithOwner }
+          linkedBranches(first: 20) {
+            nodes {
+              ref { name }
+            }
+          }
+        }
+      }
+    }`,
+    { owner, repo, issue: issueNumber },
+  );
 
-  const issue = linked[0];
+  const issue = data.repository?.issue ?? null;
+  if (!issue || issue.repository.nameWithOwner !== repository) return null;
+  const verified = issue.linkedBranches.nodes.some((linked) => linked.ref?.name === headRef);
+  if (!verified) return null;
+
+  return {
+    number: issue.number,
+    title: issue.title,
+    body: issue.body,
+    updatedAt: issue.updatedAt,
+    repository: issue.repository,
+  };
+}
+
+async function trustedTaskFromIssue(
+  repository: string,
+  issue: GitHubClosingIssue,
+): Promise<{
+  contract: TrustedTaskContract | null;
+  identity: TrustedTaskContractIdentity;
+}> {
   const body = issue.body ?? "";
   const canonical = JSON.stringify({
     repository,
@@ -393,6 +446,42 @@ async function resolveTrustedTaskContract(
       contentSha256,
     },
   };
+}
+
+export async function resolveTrustedTaskContract(
+  env: AiReviewPackageEnv,
+  repository: string,
+  pullRequest: number,
+  headRef: string,
+): Promise<{
+  contract: TrustedTaskContract | null;
+  identity: TrustedTaskContractIdentity;
+}> {
+  const [closing, linkedBranchIssue] = await Promise.all([
+    closingIssuesForPullRequest(env, repository, pullRequest),
+    linkedBranchIssueForHead(env, repository, headRef),
+  ]);
+
+  const trustedByNumber = new Map<number, GitHubClosingIssue>();
+  for (const issue of closing) trustedByNumber.set(issue.number, issue);
+  if (linkedBranchIssue) trustedByNumber.set(linkedBranchIssue.number, linkedBranchIssue);
+
+  const linked = [...trustedByNumber.values()];
+  if (linked.length === 0) {
+    return {
+      contract: null,
+      identity: { state: "unavailable", reason: "no_linked_issue" },
+    };
+  }
+
+  if (linked.length !== 1) {
+    return {
+      contract: null,
+      identity: { state: "unavailable", reason: "multiple_linked_issues" },
+    };
+  }
+
+  return trustedTaskFromIssue(repository, linked[0]);
 }
 
 function validRepository(repository: string) {
@@ -518,7 +607,7 @@ export async function buildReviewPackageData(
       `/repos/${ORGANIZATION}/${encodeURIComponent(repo)}/compare/${encodeURIComponent(pr.base.sha)}...${encodeURIComponent(pr.head.sha)}`,
       "application/vnd.github.v3.diff",
     ),
-    resolveTrustedTaskContract(env, repository, pullRequest),
+    resolveTrustedTaskContract(env, repository, pullRequest, pr.head.ref),
   ]);
 
   if (!policy || !outputContract) {
