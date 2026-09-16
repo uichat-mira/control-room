@@ -11,8 +11,10 @@ import {
   executeTrustedReviewPackage,
 } from "./ai-review-execution.ts";
 import {
+  PUBLISH_PILOT_REPOSITORIES,
   PUBLISH_PILOT_REPOSITORY,
   compareReviewFreshness,
+  isPublishPilotRepository,
   publishReviewComment,
   renderPublicationUnavailableComment,
   renderReviewComment,
@@ -89,6 +91,7 @@ function health(env: AiReviewEnv) {
     callerAuth: env.AI_REVIEW_GATEWAY_TOKEN ? "configured" : "unconfigured",
     publisherAuth: publisherConfigured ? "configured" : "unconfigured",
     publisherRepository: PUBLISH_PILOT_REPOSITORY,
+    publisherRepositories: [...PUBLISH_PILOT_REPOSITORIES],
     policyRef: env.AI_REVIEW_POLICY_REF?.trim() || "main",
     providerRoutes,
   };
@@ -221,11 +224,11 @@ async function executeAndPublishReviewResponse(request: Request, env: AiReviewEn
   const target = await parseAuthorizedTarget(request, env);
   if (target instanceof Response) return target;
 
-  if (target.repository !== PUBLISH_PILOT_REPOSITORY) {
+  if (!isPublishPilotRepository(target.repository)) {
     return json(
       {
         error: "publisher_repository_not_allowed",
-        message: `AI Review publication is limited to ${PUBLISH_PILOT_REPOSITORY} during the V1 pilot.`,
+        message: `AI Review publication is limited to ${PUBLISH_PILOT_REPOSITORIES.join(", ")} during the V1 pilot.`,
       },
       { status: 403 },
     );
