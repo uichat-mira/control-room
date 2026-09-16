@@ -21,6 +21,7 @@ export const MAX_REVIEW_COMMENT_BYTES = 60_000;
 export const PUBLISH_PILOT_REPOSITORIES = [
   "uichat-mira/mira-mobile",
   "uichat-mira/uichat-mira-docs",
+  "uichat-mira/mira-desktop",
 ] as const;
 export const PUBLISH_PILOT_REPOSITORY = PUBLISH_PILOT_REPOSITORIES[0];
 

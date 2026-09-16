@@ -12,14 +12,15 @@ import {
 const EXPECTED_PILOT_REPOSITORIES = [
   "uichat-mira/mira-mobile",
   "uichat-mira/uichat-mira-docs",
+  "uichat-mira/mira-desktop",
 ];
 
-test("publisher allowlist contains only Mobile and Docs pilots", () => {
+test("publisher allowlist contains only Mobile, Docs, and Desktop pilots", () => {
   assert.deepEqual([...PUBLISH_PILOT_REPOSITORIES], EXPECTED_PILOT_REPOSITORIES);
   assert.equal(PUBLISH_PILOT_REPOSITORY, EXPECTED_PILOT_REPOSITORIES[0]);
   assert.equal(isPublishPilotRepository("uichat-mira/mira-mobile"), true);
   assert.equal(isPublishPilotRepository("uichat-mira/uichat-mira-docs"), true);
-  assert.equal(isPublishPilotRepository("uichat-mira/mira-desktop"), false);
+  assert.equal(isPublishPilotRepository("uichat-mira/mira-desktop"), true);
   assert.equal(isPublishPilotRepository("uichat-mira/uichat-mira-relay"), false);
 });
 
@@ -39,7 +40,7 @@ test("health exposes the bounded pilot repository set while preserving the Mobil
   assert.deepEqual(body.publisherRepositories, EXPECTED_PILOT_REPOSITORIES);
 });
 
-test("publisher secret sync targets both pilots and does not enable Desktop or Relay", () => {
+test("publisher secret sync targets all three pilots and does not enable Relay", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/ai-review-publisher-secret-sync.yml", import.meta.url),
     "utf8",
@@ -48,6 +49,5 @@ test("publisher secret sync targets both pilots and does not enable Desktop or R
   for (const repository of EXPECTED_PILOT_REPOSITORIES) {
     assert.match(workflow, new RegExp(repository.replace("/", "\\/")));
   }
-  assert.equal(workflow.includes("uichat-mira/mira-desktop"), false);
   assert.equal(workflow.includes("uichat-mira/uichat-mira-relay"), false);
 });
