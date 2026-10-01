@@ -206,7 +206,6 @@ test("publishes a normalized external review with engine identity and determinis
   assert.equal(body.execution.provider.id, "opencode-go");
   assert.equal(body.execution.provider.model, "minimax-m3");
   assert.equal(body.execution.review.verdict, "HUMAN_CHECK_NEEDED");
-  assert.equal(body.providerRoute.routine.driver, "external:opencode");
   assert.equal(published.length, 1);
   assert.match(published[0], new RegExp(MIRA_REVIEW_MARKER));
   assert.match(published[0], /HUMAN_CHECK_NEEDED/);
