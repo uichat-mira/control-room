@@ -1,7 +1,9 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 
-# Mira organization-level CodeRabbit defaults.
-# Source of truth: Control Room.
+# Mira organization-level CodeRabbit operational defaults.
+# Source of truth for these soft defaults: Control Room.
+# Organization review governance and the CodeRabbit provider boundary remain owned by
+# uichat-mira/.github/ai-review/providers/coderabbit.md.
 #
 # These are soft defaults only. Repositories may override them when their
 # implementation context genuinely differs.
