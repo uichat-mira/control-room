@@ -18,6 +18,20 @@ test("keeps caller authentication distinct from GitHub read credentials", () => 
   assert.notEqual(result.AI_REVIEW_GATEWAY_TOKEN, result.GITHUB_READ_TOKEN);
 });
 
+test("keeps external result authentication purpose-specific and distinct from gateway auth", () => {
+  const source = {
+    GITHUB_READ_TOKEN: "github-read-token",
+    AI_REVIEW_GATEWAY_TOKEN: "gateway-token",
+    AI_REVIEW_EXTERNAL_RESULT_TOKEN: "external-result-token",
+  } satisfies AiReviewEnv;
+
+  const result = sharedAiReviewEnv(source);
+
+  assert.equal(result.AI_REVIEW_EXTERNAL_RESULT_TOKEN, "external-result-token");
+  assert.notEqual(result.AI_REVIEW_EXTERNAL_RESULT_TOKEN, result.AI_REVIEW_GATEWAY_TOKEN);
+  assert.notEqual(result.AI_REVIEW_EXTERNAL_RESULT_TOKEN, result.GITHUB_READ_TOKEN);
+});
+
 test("does not fall back to the GitHub read token when caller auth is absent", () => {
   const result = sharedAiReviewEnv({
     GITHUB_READ_TOKEN: "github-read-token",
