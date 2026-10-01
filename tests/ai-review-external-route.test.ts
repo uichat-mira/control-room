@@ -264,7 +264,7 @@ test("publishes REVIEW_UNAVAILABLE when external model output violates the Mira 
   assert.equal(body.publication.state, "CREATED");
   assert.equal(published.length, 1);
   assert.match(published[0], /REVIEW_UNAVAILABLE/);
-  assert.match(published[0], /external_review_invalid/);
+  assert.match(published[0], /external\\_review\\_invalid/);
 });
 
 test("rejects exact control identity mismatch without treating it as a current review", async (t) => {
