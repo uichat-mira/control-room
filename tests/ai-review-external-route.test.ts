@@ -57,7 +57,7 @@ function requestBody(review: unknown = {
   };
 }
 
-function reviewRequest(body: unknown, token = "caller-token") {
+function reviewRequest(body: unknown, token = "external-result-token") {
   return new Request("https://control.example/api/v1/ai-review/result", {
     method: "POST",
     headers: {
@@ -166,6 +166,7 @@ const env = {
   GITHUB_READ_TOKEN: "github-read",
   GITHUB_PUBLISH_TOKEN: "github-publish",
   AI_REVIEW_GATEWAY_TOKEN: "caller-token",
+  AI_REVIEW_EXTERNAL_RESULT_TOKEN: "external-result-token",
 };
 
 test("rejects unauthenticated external results before any GitHub request", async (t) => {
@@ -181,6 +182,26 @@ test("rejects unauthenticated external results before any GitHub request", async
 
   const response = await handleAiReviewRequest(
     reviewRequest(requestBody(), "wrong-token"),
+    env,
+  );
+
+  assert.equal(response.status, 401);
+  assert.equal(fetchCalled, false);
+});
+
+test("does not accept the general gateway credential for external result submission", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalled = false;
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    throw new Error("network must not be reached");
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const response = await handleAiReviewRequest(
+    reviewRequest(requestBody(), "caller-token"),
     env,
   );
 
