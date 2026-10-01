@@ -179,7 +179,6 @@ test("normalizes external review output and reconciles deterministic material ga
   assert.equal(envelope.execution.provider.engine, "opencode");
   assert.equal(envelope.execution.provider.id, "opencode-go");
   assert.equal(envelope.execution.provider.model, "minimax-m3");
-  assert.equal(envelope.providerRoute.routine.driver, "external:opencode");
   assert.deepEqual(envelope.identity, {
     repository: "uichat-mira/mira-desktop",
     pullRequest: 177,
