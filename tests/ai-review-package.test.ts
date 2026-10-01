@@ -5,6 +5,7 @@ import { Buffer } from "node:buffer";
 import {
   ReviewPackageError,
   buildReviewPackageData,
+  resolveTrustedTaskContract,
 } from "../src/ai-review-package.ts";
 
 const BASE_SHA = "1111111111111111111111111111111111111111";
@@ -182,6 +183,171 @@ test("keeps an explicit material gap when no trusted linked work item exists", a
     reason: "no_linked_issue",
   });
   assert.ok(pkg.gaps.some((gap) => gap.code === "trusted_task_contract_unavailable"));
+});
+
+test("resolves a trusted task contract from a same-repository issue-number work branch without GitHub linked-branch metadata", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input.url;
+
+    if (url.endsWith("/repos/uichat-mira/mira-desktop/pulls/201")) {
+      return Response.json({
+        number: 201,
+        title: "Default Agent entry",
+        body: "Plain PR body without a closing keyword",
+        draft: false,
+        user: { login: "builder" },
+        base: {
+          ref: "dev",
+          sha: BASE_SHA,
+          repo: { full_name: "uichat-mira/mira-desktop" },
+        },
+        head: {
+          ref: "feat/198-default-agent-entry",
+          sha: HEAD_SHA,
+          repo: { full_name: "uichat-mira/mira-desktop" },
+        },
+      });
+    }
+
+    if (url.endsWith("/repos/uichat-mira/.github/commits/main")) {
+      return Response.json({ sha: POLICY_COMMIT });
+    }
+    if (url.includes("/contents/ai-review/POLICY.md")) {
+      return contentResponse("ai-review/POLICY.md", POLICY_BLOB, "policy");
+    }
+    if (url.includes("/contents/ai-review/OUTPUT-CONTRACT.md")) {
+      return contentResponse("ai-review/OUTPUT-CONTRACT.md", OUTPUT_BLOB, "output");
+    }
+    if (url.includes("/contents/.ai/review-profile.md")) {
+      return new Response("not found", { status: 404 });
+    }
+    if (url.includes("/contents/AGENTS.md")) {
+      return contentResponse("AGENTS.md", ROOT_BLOB, "root");
+    }
+    if (url.includes("/compare/")) return new Response("diff");
+
+    if (url === "https://api.github.com/graphql") {
+      const payload = JSON.parse(String(init?.body ?? "{}"));
+      if (String(payload.query).includes("MiraReviewClosingIssues")) {
+        return Response.json({
+          data: {
+            repository: {
+              pullRequest: {
+                closingIssuesReferences: { nodes: [] },
+              },
+            },
+          },
+        });
+      }
+      if (String(payload.query).includes("MiraReviewHeadRefIssue")) {
+        assert.equal(payload.variables.issue, 198);
+        return Response.json({
+          data: {
+            repository: {
+              issue: {
+                number: 198,
+                title: "chat: default new conversations into the existing Agent Runtime (E05A-1)",
+                body: "Trusted #198 task contract",
+                updatedAt: "2026-10-01T14:13:10Z",
+                repository: { nameWithOwner: "uichat-mira/mira-desktop" },
+              },
+            },
+          },
+        });
+      }
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const pkg = await buildReviewPackageData(
+    { GITHUB_READ_TOKEN: "test-token" },
+    "uichat-mira/mira-desktop",
+    201,
+  );
+
+  assert.equal(pkg.controls.taskContract?.issue, 198);
+  assert.equal(pkg.controls.taskContract?.body, "Trusted #198 task contract");
+  assert.equal(pkg.controls.identity.taskContract.state, "resolved");
+  assert.equal(
+    pkg.gaps.some((gap) => gap.code === "trusted_task_contract_unavailable"),
+    false,
+  );
+});
+
+test("fails closed when a branch-name issue binding conflicts with a different native closing issue", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input.url;
+    if (url !== "https://api.github.com/graphql") {
+      throw new Error(`Unexpected fetch: ${url}`);
+    }
+
+    const payload = JSON.parse(String(init?.body ?? "{}"));
+    if (String(payload.query).includes("MiraReviewClosingIssues")) {
+      return Response.json({
+        data: {
+          repository: {
+            pullRequest: {
+              closingIssuesReferences: {
+                nodes: [
+                  {
+                    number: 199,
+                    title: "Different task",
+                    body: "Different task contract",
+                    updatedAt: "2026-10-01T14:00:00Z",
+                    repository: { nameWithOwner: "uichat-mira/mira-desktop" },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      });
+    }
+
+    if (String(payload.query).includes("MiraReviewHeadRefIssue")) {
+      return Response.json({
+        data: {
+          repository: {
+            issue: {
+              number: 198,
+              title: "Expected branch task",
+              body: "Expected task contract",
+              updatedAt: "2026-10-01T14:13:10Z",
+              repository: { nameWithOwner: "uichat-mira/mira-desktop" },
+            },
+          },
+        },
+      });
+    }
+
+    throw new Error("Unexpected GraphQL query");
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const task = await resolveTrustedTaskContract(
+    { GITHUB_READ_TOKEN: "test-token" },
+    "uichat-mira/mira-desktop",
+    201,
+    "feat/198-default-agent-entry",
+  );
+
+  assert.equal(task.contract, null);
+  assert.deepEqual(task.identity, {
+    state: "unavailable",
+    reason: "multiple_linked_issues",
+  });
 });
 
 test("rejects an out-of-organization repository before any GitHub request", async (t) => {
