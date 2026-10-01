@@ -11,8 +11,17 @@ import {
   executeTrustedReviewPackage,
 } from "./ai-review-execution.ts";
 import {
+  ExternalReviewSubmissionError,
+  buildExternalReviewEnvelope,
+  externalIdentityEnvelope,
+  parseExternalReviewSubmission,
+  type ExternalReviewSubmission,
+} from "./ai-review-external.ts";
+import {
+  PUBLISH_PILOT_REPOSITORIES,
   PUBLISH_PILOT_REPOSITORY,
   compareReviewFreshness,
+  isPublishPilotRepository,
   publishReviewComment,
   renderPublicationUnavailableComment,
   renderReviewComment,
@@ -30,6 +39,7 @@ export interface AiReviewEnv
     AiReviewProviderEnv,
     AiReviewPublicationEnv {
   AI_REVIEW_GATEWAY_TOKEN?: string;
+  AI_REVIEW_EXTERNAL_RESULT_TOKEN?: string;
 }
 
 interface ReviewTarget {
@@ -66,13 +76,24 @@ async function sameSecret(left: string, right: string) {
   return mismatch === 0;
 }
 
-async function authorized(request: Request, env: AiReviewEnv) {
-  const configured = env.AI_REVIEW_GATEWAY_TOKEN?.trim();
+async function authorizedWithToken(
+  request: Request,
+  configuredToken: string | undefined,
+) {
+  const configured = configuredToken?.trim();
   if (!configured) return "unconfigured" as const;
 
   const match = (request.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i);
   if (!match) return false as const;
   return sameSecret(match[1].trim(), configured);
+}
+
+async function authorized(request: Request, env: AiReviewEnv) {
+  return authorizedWithToken(request, env.AI_REVIEW_GATEWAY_TOKEN);
+}
+
+async function externalResultAuthorized(request: Request, env: AiReviewEnv) {
+  return authorizedWithToken(request, env.AI_REVIEW_EXTERNAL_RESULT_TOKEN);
 }
 
 function health(env: AiReviewEnv) {
@@ -87,8 +108,10 @@ function health(env: AiReviewEnv) {
     mode: publisherConfigured ? "review-publication-pilot" : "review-execution-unpublished",
     github: env.GITHUB_READ_TOKEN ? "configured" : "unconfigured",
     callerAuth: env.AI_REVIEW_GATEWAY_TOKEN ? "configured" : "unconfigured",
+    externalResultAuth: env.AI_REVIEW_EXTERNAL_RESULT_TOKEN ? "configured" : "unconfigured",
     publisherAuth: publisherConfigured ? "configured" : "unconfigured",
     publisherRepository: PUBLISH_PILOT_REPOSITORY,
+    publisherRepositories: [...PUBLISH_PILOT_REPOSITORIES],
     policyRef: env.AI_REVIEW_POLICY_REF?.trim() || "main",
     providerRoutes,
   };
@@ -108,6 +131,17 @@ function unexpectedPackageError(error: unknown) {
       message: error instanceof Error ? error.message : "Unknown review package failure",
     },
     { status: 502 },
+  );
+}
+
+function externalReviewErrorResponse(error: ExternalReviewSubmissionError) {
+  return json(
+    {
+      error: error.code,
+      message: error.message,
+      ...(error.mismatches.length > 0 ? { mismatches: error.mismatches } : {}),
+    },
+    { status: error.status },
   );
 }
 
@@ -176,6 +210,39 @@ async function buildReviewPackageResponse(request: Request, env: AiReviewEnv) {
   return pkg instanceof Response ? pkg : json(pkg);
 }
 
+async function parseAuthorizedExternalSubmission(
+  request: Request,
+  env: AiReviewEnv,
+): Promise<ExternalReviewSubmission | Response> {
+  const auth = await externalResultAuthorized(request, env);
+  if (auth === "unconfigured") {
+    return json(
+      {
+        error: "external_result_auth_unconfigured",
+        message: "External AI Review result authentication must be configured before result submissions are accepted.",
+      },
+      { status: 503 },
+    );
+  }
+  if (!auth) return json({ error: "unauthorized" }, { status: 401 });
+
+  let input: unknown;
+  try {
+    input = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, { status: 400 });
+  }
+
+  try {
+    return parseExternalReviewSubmission(input);
+  } catch (error) {
+    if (error instanceof ExternalReviewSubmissionError) {
+      return externalReviewErrorResponse(error);
+    }
+    throw error;
+  }
+}
+
 async function executeReviewResponse(request: Request, env: AiReviewEnv) {
   const target = await parseAuthorizedTarget(request, env);
   if (target instanceof Response) return target;
@@ -221,11 +288,11 @@ async function executeAndPublishReviewResponse(request: Request, env: AiReviewEn
   const target = await parseAuthorizedTarget(request, env);
   if (target instanceof Response) return target;
 
-  if (target.repository !== PUBLISH_PILOT_REPOSITORY) {
+  if (!isPublishPilotRepository(target.repository)) {
     return json(
       {
         error: "publisher_repository_not_allowed",
-        message: `AI Review publication is limited to ${PUBLISH_PILOT_REPOSITORY} during the V1 pilot.`,
+        message: `AI Review publication is limited to ${PUBLISH_PILOT_REPOSITORIES.join(", ")} during the V1 pilot.`,
       },
       { status: 403 },
     );
@@ -325,6 +392,169 @@ async function executeAndPublishReviewResponse(request: Request, env: AiReviewEn
   }
 }
 
+
+async function submitAndPublishExternalReviewResponse(
+  request: Request,
+  env: AiReviewEnv,
+) {
+  const submission = await parseAuthorizedExternalSubmission(request, env);
+  if (submission instanceof Response) return submission;
+
+  const target: ReviewTarget = {
+    repository: submission.repository,
+    pullRequest: submission.pullRequest,
+  };
+
+  if (!isPublishPilotRepository(target.repository)) {
+    return json(
+      {
+        error: "publisher_repository_not_allowed",
+        message: `AI Review publication is limited to ${PUBLISH_PILOT_REPOSITORIES.join(", ")} during the V1 pilot.`,
+      },
+      { status: 403 },
+    );
+  }
+  if (!env.GITHUB_PUBLISH_TOKEN?.trim()) {
+    return json(
+      {
+        error: "publisher_unconfigured",
+        message: "GITHUB_PUBLISH_TOKEN is required before Mira Review can publish to GitHub.",
+      },
+      { status: 503 },
+    );
+  }
+
+  let pkg: ReviewPackage;
+  try {
+    pkg = await buildReviewPackageData(env, target.repository, target.pullRequest);
+  } catch (error) {
+    const reason = error instanceof ReviewPackageError ? error.code : "review_package_failed";
+    await publishUnavailableForTarget(env, target, reason);
+    if (error instanceof ReviewPackageError) return packageErrorResponse(error);
+    return unexpectedPackageError(error);
+  }
+
+  const submittedEnvelope = externalIdentityEnvelope(submission);
+  const submittedFreshness = compareReviewFreshness(submittedEnvelope, pkg);
+  if (submittedFreshness.state === "STALE_REVIEW") {
+    try {
+      const publication = await publishReviewComment(
+        env,
+        target.repository,
+        target.pullRequest,
+        renderStaleReviewComment(submittedEnvelope, pkg, submittedFreshness),
+      );
+      return json(
+        {
+          ...submittedEnvelope,
+          freshness: submittedFreshness,
+          publication,
+          error: "external_identity_mismatch",
+        },
+        { status: 409 },
+      );
+    } catch {
+      return json(
+        {
+          ...submittedEnvelope,
+          freshness: submittedFreshness,
+          publication: { state: "FAILED" },
+          error: "review_publication_failed",
+        },
+        { status: 502 },
+      );
+    }
+  }
+
+  let envelope;
+  try {
+    envelope = buildExternalReviewEnvelope(pkg, submission);
+  } catch (error) {
+    if (error instanceof ExternalReviewSubmissionError) {
+      if (error.code === "invalid_external_review") {
+        const unavailable = await publishUnavailableForTarget(
+          env,
+          target,
+          "external_review_invalid",
+        );
+        return json(
+          {
+            error: error.code,
+            message: error.message,
+            publication: unavailable.ok ? unavailable.publication : { state: "FAILED" },
+          },
+          { status: error.status },
+        );
+      }
+      return externalReviewErrorResponse(error);
+    }
+    return json(
+      {
+        error: "external_review_processing_failed",
+        message: "External review result could not be normalized safely.",
+      },
+      { status: 502 },
+    );
+  }
+
+  let current: ReviewPackage;
+  try {
+    current = await buildReviewPackageData(env, target.repository, target.pullRequest);
+  } catch {
+    const unavailable = await publishUnavailableForTarget(
+      env,
+      target,
+      "freshness_recheck_failed",
+    );
+    return json(
+      {
+        ...envelope,
+        publication: unavailable.ok ? unavailable.publication : { state: "FAILED" },
+        freshness: { state: "UNKNOWN" },
+      },
+      { status: 503 },
+    );
+  }
+
+  const freshness = compareReviewFreshness(envelope, current);
+  let body: string;
+  let status: number;
+  if (freshness.state === "STALE_REVIEW") {
+    body = renderStaleReviewComment(envelope, current, freshness);
+    status = 409;
+  } else {
+    body = renderReviewComment(envelope);
+    status = 200;
+  }
+
+  try {
+    const publication = await publishReviewComment(
+      env,
+      target.repository,
+      target.pullRequest,
+      body,
+    );
+    return json(
+      {
+        ...envelope,
+        freshness,
+        publication,
+      },
+      { status },
+    );
+  } catch {
+    return json(
+      {
+        ...envelope,
+        freshness,
+        publication: { state: "FAILED" },
+        error: "review_publication_failed",
+      },
+      { status: 502 },
+    );
+  }
+}
+
 export async function handleAiReviewRequest(request: Request, env: AiReviewEnv): Promise<Response> {
   const { pathname } = new URL(request.url);
 
@@ -338,7 +568,8 @@ export async function handleAiReviewRequest(request: Request, env: AiReviewEnv):
   const privatePostRoute =
     pathname === "/api/v1/ai-review/package" ||
     pathname === "/api/v1/ai-review/review" ||
-    pathname === "/api/v1/ai-review/publish";
+    pathname === "/api/v1/ai-review/publish" ||
+    pathname === "/api/v1/ai-review/result";
 
   if (privatePostRoute) {
     if (request.method === "OPTIONS") return privateRouteOptions();
@@ -353,6 +584,9 @@ export async function handleAiReviewRequest(request: Request, env: AiReviewEnv):
     }
     if (pathname === "/api/v1/ai-review/review") {
       return executeReviewResponse(request, env);
+    }
+    if (pathname === "/api/v1/ai-review/result") {
+      return submitAndPublishExternalReviewResponse(request, env);
     }
     return executeAndPublishReviewResponse(request, env);
   }

@@ -10,6 +10,7 @@ import {
 } from "./ai-review-provider-registry.ts";
 import {
   executeReviewWithFallback,
+  type NormalizedReview,
   type ReviewExecutionResult,
 } from "./ai-review-runtime.ts";
 
@@ -31,7 +32,7 @@ export interface ReviewExecutionEnvelope {
     rootContractBlobSha: string | null;
     taskContract: TrustedTaskContractIdentity;
   };
-  providerRoute: {
+  providerRoute?: {
     routine: ReviewRouteStatus;
     fallback?: ReviewRouteStatus;
     escalation?: ReviewRouteStatus;
@@ -55,29 +56,36 @@ export function reviewPackageIdentity(pkg: ReviewPackage): ReviewExecutionEnvelo
   };
 }
 
+export function reconcileDeterministicReview(
+  review: NormalizedReview,
+  pkg: ReviewPackage,
+): NormalizedReview {
+  if (pkg.gaps.length === 0) return review;
+
+  const deterministicMessages = pkg.gaps.map((gap) => gap.message);
+  const hasMaterialGap = pkg.gaps.some((gap) => gap.material);
+  const reconciledVerdict =
+    hasMaterialGap && review.verdict === "NO_BLOCKING_FINDINGS"
+      ? "HUMAN_CHECK_NEEDED"
+      : review.verdict;
+
+  return {
+    ...review,
+    verdict: reconciledVerdict,
+    validationGaps: [
+      ...new Set([...deterministicMessages, ...review.validationGaps]),
+    ],
+  };
+}
+
 function withDeterministicGaps(
   execution: ReviewExecutionResult,
   pkg: ReviewPackage,
 ): ReviewExecutionResult {
-  if (execution.state !== "COMPLETED" || pkg.gaps.length === 0) return execution;
-
-  const deterministicMessages = pkg.gaps.map((gap) => gap.message);
-  const hasMaterialGap = pkg.gaps.some((gap) => gap.material);
-  const currentVerdict = execution.review.verdict;
-  const reconciledVerdict =
-    hasMaterialGap && currentVerdict === "NO_BLOCKING_FINDINGS"
-      ? "HUMAN_CHECK_NEEDED"
-      : currentVerdict;
-
+  if (execution.state !== "COMPLETED") return execution;
   return {
     ...execution,
-    review: {
-      ...execution.review,
-      verdict: reconciledVerdict,
-      validationGaps: [
-        ...new Set([...deterministicMessages, ...execution.review.validationGaps]),
-      ],
-    },
+    review: reconcileDeterministicReview(execution.review, pkg),
   };
 }
 

@@ -18,7 +18,16 @@ const GITHUB_API = "https://api.github.com";
 export const MIRA_REVIEW_MARKER = "<!-- mira-ai-review:v1 -->" as const;
 export const REVIEW_OUTPUT_CONTRACT_VERSION = "mira-ai-review-output/v1" as const;
 export const MAX_REVIEW_COMMENT_BYTES = 60_000;
-export const PUBLISH_PILOT_REPOSITORY = "uichat-mira/mira-mobile" as const;
+export const PUBLISH_PILOT_REPOSITORIES = [
+  "uichat-mira/mira-mobile",
+  "uichat-mira/uichat-mira-docs",
+  "uichat-mira/mira-desktop",
+] as const;
+export const PUBLISH_PILOT_REPOSITORY = PUBLISH_PILOT_REPOSITORIES[0];
+
+export function isPublishPilotRepository(repository: string) {
+  return PUBLISH_PILOT_REPOSITORIES.some((allowed) => allowed === repository);
+}
 
 export interface AiReviewPublicationEnv {
   GITHUB_PUBLISH_TOKEN?: string;
@@ -191,6 +200,7 @@ export function renderReviewComment(envelope: ReviewExecutionEnvelope) {
 
   const metadataSection = [
     renderIdentityMetadata(envelope),
+    ...(provider.engine ? [`- **Engine:** ${safeInline(provider.engine)}`] : []),
     `- **Provider:** ${safeInline(provider.id)}`,
     `- **Provider role:** ${safeInline(provider.role)}`,
     `- **Model:** ${safeInline(provider.model)}`,
@@ -361,9 +371,9 @@ export async function publishReviewComment(
   pullRequest: number,
   body: string,
 ): Promise<ReviewPublicationResult> {
-  if (repository !== PUBLISH_PILOT_REPOSITORY) {
+  if (!isPublishPilotRepository(repository)) {
     throw new ReviewPublicationError(
-      `AI Review publication is limited to ${PUBLISH_PILOT_REPOSITORY} during the V1 pilot.`,
+      `AI Review publication is limited to ${PUBLISH_PILOT_REPOSITORIES.join(", ")} during the V1 pilot.`,
     );
   }
   ensureCommentSize(body);

@@ -153,6 +153,7 @@ test("health exposes credential state and route activation separately without pr
     {
       GITHUB_READ_TOKEN: "github-token",
       AI_REVIEW_GATEWAY_TOKEN: "caller-token",
+      AI_REVIEW_EXTERNAL_RESULT_TOKEN: "external-result-token",
       AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "provider-secret-key",
       AI_PROVIDER_OPENCODE_GO_KEY: "fallback-secret-key",
     },
@@ -163,6 +164,7 @@ test("health exposes credential state and route activation separately without pr
   assert.equal(response.status, 200);
   assert.equal(body.mode, "review-execution-unpublished");
   assert.equal(body.publisherAuth, "unconfigured");
+  assert.equal(body.externalResultAuth, "configured");
   assert.equal(body.executionVersion, "mira-ai-review-execution/v0");
   assert.deepEqual(body.providerRoutes.CODE_REVIEW.routine, {
     state: "configured",
