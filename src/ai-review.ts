@@ -39,6 +39,7 @@ export interface AiReviewEnv
     AiReviewProviderEnv,
     AiReviewPublicationEnv {
   AI_REVIEW_GATEWAY_TOKEN?: string;
+  AI_REVIEW_EXTERNAL_RESULT_TOKEN?: string;
 }
 
 interface ReviewTarget {
@@ -75,13 +76,24 @@ async function sameSecret(left: string, right: string) {
   return mismatch === 0;
 }
 
-async function authorized(request: Request, env: AiReviewEnv) {
-  const configured = env.AI_REVIEW_GATEWAY_TOKEN?.trim();
+async function authorizedWithToken(
+  request: Request,
+  configuredToken: string | undefined,
+) {
+  const configured = configuredToken?.trim();
   if (!configured) return "unconfigured" as const;
 
   const match = (request.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i);
   if (!match) return false as const;
   return sameSecret(match[1].trim(), configured);
+}
+
+async function authorized(request: Request, env: AiReviewEnv) {
+  return authorizedWithToken(request, env.AI_REVIEW_GATEWAY_TOKEN);
+}
+
+async function externalResultAuthorized(request: Request, env: AiReviewEnv) {
+  return authorizedWithToken(request, env.AI_REVIEW_EXTERNAL_RESULT_TOKEN);
 }
 
 function health(env: AiReviewEnv) {
@@ -96,6 +108,7 @@ function health(env: AiReviewEnv) {
     mode: publisherConfigured ? "review-publication-pilot" : "review-execution-unpublished",
     github: env.GITHUB_READ_TOKEN ? "configured" : "unconfigured",
     callerAuth: env.AI_REVIEW_GATEWAY_TOKEN ? "configured" : "unconfigured",
+    externalResultAuth: env.AI_REVIEW_EXTERNAL_RESULT_TOKEN ? "configured" : "unconfigured",
     publisherAuth: publisherConfigured ? "configured" : "unconfigured",
     publisherRepository: PUBLISH_PILOT_REPOSITORY,
     publisherRepositories: [...PUBLISH_PILOT_REPOSITORIES],
@@ -201,12 +214,12 @@ async function parseAuthorizedExternalSubmission(
   request: Request,
   env: AiReviewEnv,
 ): Promise<ExternalReviewSubmission | Response> {
-  const auth = await authorized(request, env);
+  const auth = await externalResultAuthorized(request, env);
   if (auth === "unconfigured") {
     return json(
       {
-        error: "gateway_auth_unconfigured",
-        message: "AI Review caller authentication must be configured before private review requests are accepted.",
+        error: "external_result_auth_unconfigured",
+        message: "External AI Review result authentication must be configured before result submissions are accepted.",
       },
       { status: 503 },
     );
