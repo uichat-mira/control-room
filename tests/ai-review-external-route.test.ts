@@ -189,6 +189,32 @@ test("rejects unauthenticated external results before any GitHub request", async
   assert.equal(fetchCalled, false);
 });
 
+test("fails closed when the purpose-specific external result credential is unconfigured", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalled = false;
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    throw new Error("network must not be reached");
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const response = await handleAiReviewRequest(
+    reviewRequest(requestBody()),
+    {
+      GITHUB_READ_TOKEN: "github-read",
+      GITHUB_PUBLISH_TOKEN: "github-publish",
+      AI_REVIEW_GATEWAY_TOKEN: "caller-token",
+    },
+  );
+  const body = (await response.json()) as any;
+
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "external_result_auth_unconfigured");
+  assert.equal(fetchCalled, false);
+});
+
 test("does not accept the general gateway credential for external result submission", async (t) => {
   const originalFetch = globalThis.fetch;
   let fetchCalled = false;
