@@ -32,7 +32,7 @@ export interface ReviewExecutionEnvelope {
     rootContractBlobSha: string | null;
     taskContract: TrustedTaskContractIdentity;
   };
-  providerRoute: {
+  providerRoute?: {
     routine: ReviewRouteStatus;
     fallback?: ReviewRouteStatus;
     escalation?: ReviewRouteStatus;
