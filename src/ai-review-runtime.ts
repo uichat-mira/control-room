@@ -109,6 +109,7 @@ export interface CompletedReviewExecution {
     id: string;
     model: string;
     role: ReviewProviderRole;
+    engine?: string;
   };
   attempts: ProviderAttempt[];
 }

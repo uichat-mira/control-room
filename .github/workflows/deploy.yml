@@ -50,6 +50,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
       AI_REVIEW_GATEWAY_TOKEN: ${{ secrets.AI_REVIEW_GATEWAY_TOKEN }}
+      AI_REVIEW_EXTERNAL_RESULT_TOKEN: ${{ secrets.AI_REVIEW_EXTERNAL_RESULT_TOKEN }}
       AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: ${{ secrets.AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY }}
       AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY: ${{ secrets.AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY }}
       AI_PROVIDER_OPENCODE_GO_KEY: ${{ secrets.AI_PROVIDER_OPENCODE_GO_KEY }}
@@ -179,6 +180,9 @@ jobs:
           umask 077
           printf 'CLOUDFLARE_READ_TOKEN=%s\n' "$CLOUDFLARE_API_TOKEN" > /tmp/control-room-secrets.env
           printf 'AI_REVIEW_GATEWAY_TOKEN=%s\n' "$AI_REVIEW_GATEWAY_TOKEN" >> /tmp/control-room-secrets.env
+          if [ -n "${AI_REVIEW_EXTERNAL_RESULT_TOKEN:-}" ]; then
+            printf 'AI_REVIEW_EXTERNAL_RESULT_TOKEN=%s\n' "$AI_REVIEW_EXTERNAL_RESULT_TOKEN" >> /tmp/control-room-secrets.env
+          fi
           if [ -n "${ORG_GITHUB_TOKEN:-}" ]; then
             printf 'GITHUB_READ_TOKEN=%s\n' "$ORG_GITHUB_TOKEN" >> /tmp/control-room-secrets.env
           fi
