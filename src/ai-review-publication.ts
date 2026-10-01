@@ -200,6 +200,7 @@ export function renderReviewComment(envelope: ReviewExecutionEnvelope) {
 
   const metadataSection = [
     renderIdentityMetadata(envelope),
+    ...(provider.engine ? [`- **Engine:** ${safeInline(provider.engine)}`] : []),
     `- **Provider:** ${safeInline(provider.id)}`,
     `- **Provider role:** ${safeInline(provider.role)}`,
     `- **Model:** ${safeInline(provider.model)}`,

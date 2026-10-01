@@ -65,3 +65,6 @@ jobs:
 
       - name: Run AI Review core contract tests
         run: npm run test:ai-review
+
+      - name: Run AI Review Worker runtime integration tests
+        run: npm run test:ai-review:integration
