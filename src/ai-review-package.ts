@@ -107,15 +107,9 @@ interface ClosingIssuesResponse {
   } | null;
 }
 
-interface LinkedBranchIssueResponse {
+interface HeadRefIssueResponse {
   repository: {
-    issue: (GitHubClosingIssue & {
-      linkedBranches: {
-        nodes: Array<{
-          ref: { name: string } | null;
-        }>;
-      };
-    }) | null;
+    issue: GitHubClosingIssue | null;
   } | null;
 }
 
@@ -362,7 +356,7 @@ async function closingIssuesForPullRequest(
   );
 }
 
-async function linkedBranchIssueForHead(
+async function issueForHeadRefHint(
   env: AiReviewPackageEnv,
   repository: string,
   headRef: string,
@@ -371,9 +365,9 @@ async function linkedBranchIssueForHead(
   if (!issueNumber) return null;
 
   const { owner, repo } = repositoryParts(repository);
-  const data = await githubGraphql<LinkedBranchIssueResponse>(
+  const data = await githubGraphql<HeadRefIssueResponse>(
     env,
-    `query MiraReviewLinkedBranchIssue($owner: String!, $repo: String!, $issue: Int!) {
+    `query MiraReviewHeadRefIssue($owner: String!, $repo: String!, $issue: Int!) {
       repository(owner: $owner, name: $repo) {
         issue(number: $issue) {
           number
@@ -381,11 +375,6 @@ async function linkedBranchIssueForHead(
           body
           updatedAt
           repository { nameWithOwner }
-          linkedBranches(first: 20) {
-            nodes {
-              ref { name }
-            }
-          }
         }
       }
     }`,
@@ -394,16 +383,7 @@ async function linkedBranchIssueForHead(
 
   const issue = data.repository?.issue ?? null;
   if (!issue || issue.repository.nameWithOwner !== repository) return null;
-  const verified = issue.linkedBranches.nodes.some((linked) => linked.ref?.name === headRef);
-  if (!verified) return null;
-
-  return {
-    number: issue.number,
-    title: issue.title,
-    body: issue.body,
-    updatedAt: issue.updatedAt,
-    repository: issue.repository,
-  };
+  return issue;
 }
 
 async function trustedTaskFromIssue(
@@ -457,14 +437,14 @@ export async function resolveTrustedTaskContract(
   contract: TrustedTaskContract | null;
   identity: TrustedTaskContractIdentity;
 }> {
-  const [closing, linkedBranchIssue] = await Promise.all([
+  const [closing, branchNamedIssue] = await Promise.all([
     closingIssuesForPullRequest(env, repository, pullRequest),
-    linkedBranchIssueForHead(env, repository, headRef),
+    issueForHeadRefHint(env, repository, headRef),
   ]);
 
   const trustedByNumber = new Map<number, GitHubClosingIssue>();
   for (const issue of closing) trustedByNumber.set(issue.number, issue);
-  if (linkedBranchIssue) trustedByNumber.set(linkedBranchIssue.number, linkedBranchIssue);
+  if (branchNamedIssue) trustedByNumber.set(branchNamedIssue.number, branchNamedIssue);
 
   const linked = [...trustedByNumber.values()];
   if (linked.length === 0) {
