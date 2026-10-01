@@ -32,7 +32,7 @@ test("extracts an Issue number only as a work-branch hint", () => {
   assert.equal(issueNumberHintFromHeadRef("dev"), null);
 });
 
-test("trusts an Issue when GitHub linkedBranches proves the exact PR head relation", async (t) => {
+test("trusts the real Issue named by a same-repository work branch", async (t) => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_input, init) => {
     const request = graphqlQuery(init);
@@ -41,17 +41,12 @@ test("trusts an Issue when GitHub linkedBranches proves the exact PR head relati
         data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [] } } } },
       });
     }
-    if (request.query?.includes("MiraReviewLinkedBranchIssue")) {
+    if (request.query?.includes("MiraReviewHeadRefIssue")) {
       assert.equal(request.variables?.issue, 88);
       return Response.json({
         data: {
           repository: {
-            issue: {
-              ...closingIssue(88),
-              linkedBranches: {
-                nodes: [{ ref: { name: "feat/88-trusted-work-start" } }],
-              },
-            },
+            issue: closingIssue(88),
           },
         },
       });
@@ -74,7 +69,7 @@ test("trusts an Issue when GitHub linkedBranches proves the exact PR head relati
   assert.equal(task.identity.state, "resolved");
 });
 
-test("does not trust a numeric branch hint unless GitHub verifies the linked branch", async (t) => {
+test("does not require GitHub linkedBranches metadata once the work branch names a real same-repository Issue", async (t) => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_input, init) => {
     const request = graphqlQuery(init);
@@ -83,16 +78,11 @@ test("does not trust a numeric branch hint unless GitHub verifies the linked bra
         data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [] } } } },
       });
     }
-    if (request.query?.includes("MiraReviewLinkedBranchIssue")) {
+    if (request.query?.includes("MiraReviewHeadRefIssue")) {
       return Response.json({
         data: {
           repository: {
-            issue: {
-              ...closingIssue(88),
-              linkedBranches: {
-                nodes: [{ ref: { name: "feat/88-some-other-branch" } }],
-              },
-            },
+            issue: closingIssue(88),
           },
         },
       });
@@ -110,10 +100,8 @@ test("does not trust a numeric branch hint unless GitHub verifies the linked bra
     "feat/88-trusted-work-start",
   );
 
-  assert.deepEqual(task.identity, {
-    state: "unavailable",
-    reason: "no_linked_issue",
-  });
+  assert.equal(task.contract?.issue, 88);
+  assert.equal(task.identity.state, "resolved");
 });
 
 test("keeps legacy closingIssuesReferences as a trusted compatibility path", async (t) => {
@@ -148,7 +136,7 @@ test("keeps legacy closingIssuesReferences as a trusted compatibility path", asy
   assert.equal(requests, 1);
 });
 
-test("refuses to guess when linked-branch and closing relations point at different Issues", async (t) => {
+test("refuses to guess when branch-name and closing relations point at different Issues", async (t) => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_input, init) => {
     const request = graphqlQuery(init);
@@ -163,16 +151,11 @@ test("refuses to guess when linked-branch and closing relations point at differe
         },
       });
     }
-    if (request.query?.includes("MiraReviewLinkedBranchIssue")) {
+    if (request.query?.includes("MiraReviewHeadRefIssue")) {
       return Response.json({
         data: {
           repository: {
-            issue: {
-              ...closingIssue(88),
-              linkedBranches: {
-                nodes: [{ ref: { name: "feat/88-trusted-work-start" } }],
-              },
-            },
+            issue: closingIssue(88),
           },
         },
       });
