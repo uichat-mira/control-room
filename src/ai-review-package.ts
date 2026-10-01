@@ -356,6 +356,9 @@ async function closingIssuesForPullRequest(
   );
 }
 
+// This binding is consumed only after buildReviewPackageData has verified a
+// same-repository PR and a supported Mira review branch transition. The branch
+// ref is repository state from GitHub, not free-form PR/comment text.
 async function issueForHeadRefHint(
   env: AiReviewPackageEnv,
   repository: string,
