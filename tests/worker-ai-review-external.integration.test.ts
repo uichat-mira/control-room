@@ -13,6 +13,7 @@ const POLICY_COMMIT = "3333333333333333333333333333333333333333";
 const POLICY_BLOB = "4444444444444444444444444444444444444444";
 const OUTPUT_BLOB = "5555555555555555555555555555555555555555";
 
+// Keep GitHub as the mocked external boundary while the production Worker runs in workerd.
 const network = setupServer();
 const harness = createTestHarness({
   workers: [
