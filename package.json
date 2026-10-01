@@ -11,7 +11,7 @@
     "test:ai-review": "node --test tests/ai-review-*.test.ts",
     "test:github-overview": "node --test tests/github-overview.test.ts",
     "deploy": "npm run build && wrangler deploy",
-    "test:ai-review:integration": "node --test tests/worker-ai-review-external.integration.test.ts"
+    "test:ai-review:integration": "npm run build && node --test tests/worker-ai-review-external.integration.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
