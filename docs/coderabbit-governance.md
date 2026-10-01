@@ -1,19 +1,27 @@
 # CodeRabbit organization governance
 
-Control Room owns Mira organization-level review governance.
+Mira Organization review governance and the CodeRabbit provider boundary are owned by
+`uichat-mira/.github/ai-review/providers/coderabbit.md`.
+
+Control Room owns only the operational CodeRabbit organization defaults and the process
+for projecting those defaults into CodeRabbit Organization Settings.
 
 ## Authority
 
-The canonical organization-level CodeRabbit defaults live at:
+Use one owner per concern:
 
-`config/coderabbit/organization-defaults.yaml`
+- `uichat-mira/.github/ai-review/providers/coderabbit.md` owns the Organization-level
+  CodeRabbit role, authority boundary, review semantics, gating posture, and configuration
+  layering rules.
+- `config/coderabbit/organization-defaults.yaml` owns the current soft operational
+  defaults that should normally be projected into CodeRabbit Organization Settings.
+- CodeRabbit Organization Settings are a runtime projection of those defaults, not an
+  independent source of policy.
+- Repository-level `.coderabbit.yaml` files own only genuine repository-specific
+  CodeRabbit behavior.
 
-CodeRabbit Organization Settings are a runtime projection of that file, not an
-independent source of policy.
-
-Repository-level `.coderabbit.yaml` files are allowed only for
-repository-specific differences. They must not duplicate the full organization
-configuration merely to keep a repository self-contained.
+Do not restate Organization AI Review policy or CodeRabbit authority rules in Control
+Room defaults merely to keep this repository self-contained.
 
 ## Initial scope
 
@@ -68,11 +76,15 @@ A repository override must never become a second organization constitution.
 Until CodeRabbit exposes organization-setting mutation through an automation
 interface we operate, updates follow this path:
 
-1. change and review the canonical defaults in Control Room;
-2. apply the same values in CodeRabbit Organization Settings;
-3. leave repository overrides untouched unless the change intentionally removes
+1. change and review the operational defaults in Control Room when the runtime
+   default itself needs to change;
+2. if the desired behavior changes Organization-level review governance or the
+   CodeRabbit provider boundary, update
+   `uichat-mira/.github/ai-review/providers/coderabbit.md` instead;
+3. apply the reviewed operational values in CodeRabbit Organization Settings;
+4. leave repository overrides untouched unless the change intentionally removes
    a duplicate or changes repository-specific behavior;
-4. verify on a controlled pull request.
+5. verify the projection on a controlled pull request.
 
 Do not create a separate `uichat-mira/coderabbit` repository solely to host a
 second copy of these defaults.
