@@ -292,15 +292,6 @@ export function externalIdentityEnvelope(
     executionVersion: REVIEW_EXECUTION_VERSION,
     executedAt: new Date().toISOString(),
     identity: submission.identity,
-    providerRoute: {
-      routine: {
-        state: "configured",
-        enabled: true,
-        provider: submission.execution.provider,
-        model: submission.execution.model,
-        driver: `external:${submission.execution.engine}`,
-      },
-    },
     execution: {
       state: "REVIEW_UNAVAILABLE",
       reason: "all_eligible_providers_failed",
@@ -344,15 +335,6 @@ export function buildExternalReviewEnvelope(
     executionVersion: REVIEW_EXECUTION_VERSION,
     executedAt: new Date().toISOString(),
     identity: reviewPackageIdentity(pkg),
-    providerRoute: {
-      routine: {
-        state: "configured",
-        enabled: true,
-        provider: submission.execution.provider,
-        model: submission.execution.model,
-        driver: `external:${submission.execution.engine}`,
-      },
-    },
     execution: {
       state: "COMPLETED",
       review,
