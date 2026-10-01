@@ -35,6 +35,7 @@ const harness = createTestHarness({
         GITHUB_READ_TOKEN: "github-read",
         GITHUB_PUBLISH_TOKEN: "github-publish",
         AI_REVIEW_GATEWAY_TOKEN: "caller-token",
+        AI_REVIEW_EXTERNAL_RESULT_TOKEN: "external-result-token",
       },
     },
   ],
@@ -203,7 +204,7 @@ async function submit(body: unknown) {
   return worker.fetch("/api/v1/ai-review/result", {
     method: "POST",
     headers: {
-      authorization: "Bearer caller-token",
+      authorization: "Bearer external-result-token",
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
