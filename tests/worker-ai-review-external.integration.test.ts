@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test, { after, afterEach, before } from "node:test";
 import { Buffer } from "node:buffer";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -13,12 +15,22 @@ const POLICY_COMMIT = "3333333333333333333333333333333333333333";
 const POLICY_BLOB = "4444444444444444444444444444444444444444";
 const OUTPUT_BLOB = "5555555555555555555555555555555555555555";
 
+// The Cloudflare Vite build writes the production Worker config and a redirect to it.
+const deployRedirectPath = resolve(".wrangler/deploy/config.json");
+const deployRedirect = JSON.parse(
+  readFileSync(deployRedirectPath, "utf8"),
+) as { configPath: string };
+const builtWorkerConfig = resolve(
+  dirname(deployRedirectPath),
+  deployRedirect.configPath,
+);
+
 // Keep GitHub as the mocked external boundary while the production Worker runs in workerd.
 const network = setupServer();
 const harness = createTestHarness({
   workers: [
     {
-      configPath: "./wrangler.jsonc",
+      configPath: builtWorkerConfig,
       secrets: {
         GITHUB_READ_TOKEN: "github-read",
         GITHUB_PUBLISH_TOKEN: "github-publish",
