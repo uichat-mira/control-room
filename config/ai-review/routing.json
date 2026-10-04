@@ -4,7 +4,7 @@
     "CODE_REVIEW": {
       "routine": {
         "provider": "opencode-go",
-        "model": "deepseek-v4-flash",
+        "model": "deepseek-v4.1-flash",
         "enabled": true
       },
       "fallback": {
@@ -26,7 +26,7 @@
       },
       "fallback": {
         "provider": "opencode-go",
-        "model": "deepseek-v4-flash",
+        "model": "deepseek-v4.1-flash",
         "enabled": false
       },
       "escalation": {
