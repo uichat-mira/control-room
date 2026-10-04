@@ -80,6 +80,19 @@
         }
       },
       "models": {
+        "deepseek-v4.1-flash": {
+          "modelId": "deepseek-v4.1-flash",
+          "transport": "openai-chat",
+          "capabilities": {
+            "reasoning": "provider-default",
+            "responseFormat": "none"
+          },
+          "reviewDefaults": {
+            "maxPromptCharacters": 250000,
+            "maxOutputTokens": 4096,
+            "outputTokenParameter": "max_tokens"
+          }
+        },
         "deepseek-v4-flash": {
           "modelId": "deepseek-v4-flash",
           "transport": "openai-chat",
