@@ -119,8 +119,8 @@ test("provider review timeout is bounded by the adapter contract", () => {
 test("fallback routing must provide real provider-account redundancy", () => {
   const routing = structuredClone(REVIEW_ROUTING);
   routing.routes.CODE_REVIEW.fallback = {
-    provider: "minimax-cn-codeplan",
-    model: "m3",
+    provider: "opencode-go",
+    model: "deepseek-v4-pro",
     enabled: false,
   };
 
