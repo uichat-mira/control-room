@@ -78,11 +78,11 @@ function pkg(gaps: ReviewPackageGap[] = [
 }
 
 const routineEnv = {
-  AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "minimax-secret",
+  AI_PROVIDER_OPENCODE_GO_KEY: "opencode-go-secret",
 };
 
 const fallbackEnv = {
-  AI_PROVIDER_OPENCODE_GO_KEY: "opencode-go-secret",
+  AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "minimax-secret",
 };
 
 function providerResponse(review: unknown) {
@@ -106,15 +106,15 @@ test("reports modeled CODE_REVIEW routes without exposing provider configuration
   assert.deepEqual(registry.route.routine, {
     state: "unconfigured",
     enabled: true,
-    provider: "minimax-cn-codeplan",
-    model: "m3",
+    provider: "opencode-go",
+    model: "deepseek-v4-flash",
     driver: "openai-chat",
   });
   assert.deepEqual(registry.route.fallback, {
     state: "unconfigured",
     enabled: false,
-    provider: "opencode-go",
-    model: "deepseek-v4-flash",
+    provider: "minimax-cn-codeplan",
+    model: "m3",
     driver: "openai-chat",
   });
   assert.deepEqual(registry.route.escalation, {
@@ -139,7 +139,7 @@ test("keeps configured but disabled fallback and escalation out of the execution
   assert.equal(registry.route.escalation?.state, "configured");
   assert.equal(registry.route.escalation?.enabled, false);
   assert.equal(registry.providers.length, 1);
-  assert.equal(registry.providers[0].id, "minimax-cn-codeplan/m3");
+  assert.equal(registry.providers[0].id, "opencode-go/deepseek-v4-flash");
   assert.equal(registry.providers[0].role, "routine");
 });
 
@@ -183,14 +183,14 @@ test("executes the configured routine provider and returns normalized review met
 
   assert.equal(result.execution.state, "COMPLETED");
   if (result.execution.state !== "COMPLETED") return;
-  assert.equal(result.execution.provider.id, "minimax-cn-codeplan/m3");
-  assert.equal(result.execution.provider.model, "MiniMax-M3");
+  assert.equal(result.execution.provider.id, "opencode-go/deepseek-v4-flash");
+  assert.equal(result.execution.provider.model, "deepseek-v4-flash");
   assert.equal(result.execution.provider.role, "routine");
   assert.equal(result.execution.review.verdict, "HUMAN_CHECK_NEEDED");
   assert.equal(result.execution.attempts.length, 1);
   assert.equal(result.execution.attempts[0].status, "success");
-  assert.equal(providerRequestBody.includes("minimax-secret"), false);
-  assert.equal(authorization, "Bearer minimax-secret");
+  assert.equal(providerRequestBody.includes("opencode-go-secret"), false);
+  assert.equal(authorization, "Bearer opencode-go-secret");
 });
 
 test("promotes a clean provider verdict when a deterministic gap is material", async (t) => {
@@ -288,7 +288,7 @@ test("does not invoke a configured fallback while the fallback route is disabled
     const url = typeof input === "string" ? input : input.url;
     requested.push(url);
     bodies.push(String(init?.body ?? ""));
-    if (url.startsWith("https://api.minimaxi.com/")) {
+    if (url.startsWith("https://opencode.ai/zen/go/")) {
       return new Response("routine internal detail", { status: 503 });
     }
     return humanCheckResponse();
