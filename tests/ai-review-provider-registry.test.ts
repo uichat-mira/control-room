@@ -24,6 +24,10 @@ test("catalog models provider accounts independently from review roles", () => {
     300_000,
   );
   assert.equal(
+    PROVIDER_CATALOG.providers["opencode-go"].models["deepseek-v4.1-flash"].modelId,
+    "deepseek-v4.1-flash",
+  );
+  assert.equal(
     PROVIDER_CATALOG.providers["opencode-go"].models["deepseek-v4-flash"].modelId,
     "deepseek-v4-flash",
   );
@@ -41,11 +45,11 @@ test("provider secret references are the only runtime credential configuration v
   ]);
 });
 
-test("CODE_REVIEW uses DeepSeek V4 Flash as the routine reviewer", () => {
+test("CODE_REVIEW uses DeepSeek V4.1 Flash as the routine reviewer", () => {
   assert.deepEqual(REVIEW_ROUTING.routes.CODE_REVIEW, {
     routine: {
       provider: "opencode-go",
-      model: "deepseek-v4-flash",
+      model: "deepseek-v4.1-flash",
       enabled: true,
     },
     fallback: {
@@ -77,7 +81,7 @@ test("provider credentials do not implicitly activate fallback or escalation", (
   assert.equal(registry.route.escalation?.state, "configured");
   assert.equal(registry.route.escalation?.enabled, false);
   assert.equal(registry.providers.length, 1);
-  assert.equal(registry.providers[0].id, "opencode-go/deepseek-v4-flash");
+  assert.equal(registry.providers[0].id, "opencode-go/deepseek-v4.1-flash");
 });
 
 test("PROMOTION_REVIEW and RELEASE_REVIEW are provisioned but disabled before rollout", () => {
