@@ -132,8 +132,8 @@ test("returns explicit REVIEW_UNAVAILABLE after building the trusted package whe
   assert.deepEqual(body.providerRoute.routine, {
     state: "unconfigured",
     enabled: true,
-    provider: "minimax-cn-codeplan",
-    model: "m3",
+    provider: "opencode-go",
+    model: "deepseek-v4-flash",
     driver: "openai-chat",
   });
   assert.equal(body.providerRoute.fallback.state, "unconfigured");
@@ -154,8 +154,8 @@ test("health exposes credential state and route activation separately without pr
       GITHUB_READ_TOKEN: "github-token",
       AI_REVIEW_GATEWAY_TOKEN: "caller-token",
       AI_REVIEW_EXTERNAL_RESULT_TOKEN: "external-result-token",
-      AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "provider-secret-key",
-      AI_PROVIDER_OPENCODE_GO_KEY: "fallback-secret-key",
+      AI_PROVIDER_OPENCODE_GO_KEY: "routine-secret-key",
+      AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "fallback-secret-key",
     },
   );
   const text = await response.text();
@@ -169,15 +169,15 @@ test("health exposes credential state and route activation separately without pr
   assert.deepEqual(body.providerRoutes.CODE_REVIEW.routine, {
     state: "configured",
     enabled: true,
-    provider: "minimax-cn-codeplan",
-    model: "m3",
+    provider: "opencode-go",
+    model: "deepseek-v4-flash",
     driver: "openai-chat",
   });
   assert.deepEqual(body.providerRoutes.CODE_REVIEW.fallback, {
     state: "configured",
     enabled: false,
-    provider: "opencode-go",
-    model: "deepseek-v4-flash",
+    provider: "minimax-cn-codeplan",
+    model: "m3",
     driver: "openai-chat",
   });
   assert.deepEqual(body.providerRoutes.CODE_REVIEW.escalation, {
@@ -187,7 +187,7 @@ test("health exposes credential state and route activation separately without pr
     model: "deepseek-v4-pro",
     driver: "openai-chat",
   });
-  assert.equal(text.includes("provider-secret-key"), false);
+  assert.equal(text.includes("routine-secret-key"), false);
   assert.equal(text.includes("fallback-secret-key"), false);
   assert.equal(text.includes("https://api.minimaxi.com"), false);
 });

@@ -431,7 +431,7 @@ test("runtime preserves deterministic gaps and promotes an invalid clean verdict
 
   const result = await executeTrustedReviewPackage(
     {
-      AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: "provider-secret",
+      AI_PROVIDER_OPENCODE_GO_KEY: "provider-secret",
     },
     reviewPackage(),
   );
@@ -444,7 +444,7 @@ test("runtime preserves deterministic gaps and promotes an invalid clean verdict
     state: "unavailable",
     reason: "no_linked_issue",
   });
-  assert.equal(result.providerRoute.routine.provider, "minimax-cn-codeplan");
+  assert.equal(result.providerRoute.routine.provider, "opencode-go");
   assert.equal(result.providerRoute.routine.state, "configured");
   assert.match(result.executedAt, /^\d{4}-\d{2}-\d{2}T/);
 });
