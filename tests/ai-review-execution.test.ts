@@ -107,7 +107,7 @@ test("reports modeled CODE_REVIEW routes without exposing provider configuration
     state: "unconfigured",
     enabled: true,
     provider: "opencode-go",
-    model: "deepseek-v4-flash",
+    model: "deepseek-v4.1-flash",
     driver: "openai-chat",
   });
   assert.deepEqual(registry.route.fallback, {
@@ -139,7 +139,7 @@ test("keeps configured but disabled fallback and escalation out of the execution
   assert.equal(registry.route.escalation?.state, "configured");
   assert.equal(registry.route.escalation?.enabled, false);
   assert.equal(registry.providers.length, 1);
-  assert.equal(registry.providers[0].id, "opencode-go/deepseek-v4-flash");
+  assert.equal(registry.providers[0].id, "opencode-go/deepseek-v4.1-flash");
   assert.equal(registry.providers[0].role, "routine");
 });
 
@@ -183,8 +183,8 @@ test("executes the configured routine provider and returns normalized review met
 
   assert.equal(result.execution.state, "COMPLETED");
   if (result.execution.state !== "COMPLETED") return;
-  assert.equal(result.execution.provider.id, "opencode-go/deepseek-v4-flash");
-  assert.equal(result.execution.provider.model, "deepseek-v4-flash");
+  assert.equal(result.execution.provider.id, "opencode-go/deepseek-v4.1-flash");
+  assert.equal(result.execution.provider.model, "deepseek-v4.1-flash");
   assert.equal(result.execution.provider.role, "routine");
   assert.equal(result.execution.review.verdict, "HUMAN_CHECK_NEEDED");
   assert.equal(result.execution.attempts.length, 1);

@@ -133,7 +133,7 @@ test("returns explicit REVIEW_UNAVAILABLE after building the trusted package whe
     state: "unconfigured",
     enabled: true,
     provider: "opencode-go",
-    model: "deepseek-v4-flash",
+    model: "deepseek-v4.1-flash",
     driver: "openai-chat",
   });
   assert.equal(body.providerRoute.fallback.state, "unconfigured");
@@ -170,7 +170,7 @@ test("health exposes credential state and route activation separately without pr
     state: "configured",
     enabled: true,
     provider: "opencode-go",
-    model: "deepseek-v4-flash",
+    model: "deepseek-v4.1-flash",
     driver: "openai-chat",
   });
   assert.deepEqual(body.providerRoutes.CODE_REVIEW.fallback, {

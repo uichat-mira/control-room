@@ -17,6 +17,13 @@ test("real-provider probe requires the CODE_REVIEW routine to be explicitly enab
   assert.match(workflow, /routine\.enabled !== true/);
 });
 
+test("real-provider probe follows the active routine instead of pinning one model", () => {
+  assert.match(workflow, /\/tmp\/ai-review-routine\.json/);
+  assert.match(workflow, /expectedRoutine\.provider/);
+  assert.match(workflow, /expectedRoutine\.model/);
+  assert.doesNotMatch(workflow, /minimax-cn-codeplan\/m3/);
+});
+
 test("paid review execution is single-shot and never retried by curl", () => {
   const marker = "- name: Execute one production review";
   const executionStep = workflow.split(marker)[1];

@@ -41,9 +41,10 @@ jobs:
           if (routine.enabled !== true) {
             throw new Error(`CODE_REVIEW routine is not enabled: ${routine.enabled}`);
           }
-          if (routine.provider !== 'minimax-cn-codeplan' || routine.model !== 'm3') {
-            throw new Error(`Unexpected routine target: ${routine.provider}/${routine.model}`);
-          }
+          fs.writeFileSync('/tmp/ai-review-routine.json', JSON.stringify({
+            provider: routine.provider,
+            model: routine.model,
+          }));
           console.log(`Real-provider probe target: ${routine.provider}/${routine.model} (${routine.driver})`);
           NODE
 
@@ -97,10 +98,16 @@ jobs:
           if (result.identity?.reviewMode !== 'CODE_REVIEW') {
             throw new Error(`Unexpected review mode: ${result.identity?.reviewMode}`);
           }
-          if (result.execution.provider?.id !== 'minimax-cn-codeplan/m3') {
+          const expectedRoutine = JSON.parse(
+            fs.readFileSync('/tmp/ai-review-routine.json', 'utf8'),
+          );
+          if (
+            result.execution.provider?.id !==
+            `${expectedRoutine.provider}/${expectedRoutine.model}`
+          ) {
             throw new Error(`Unexpected completed provider: ${result.execution.provider?.id}`);
           }
-          if (result.execution.provider?.model !== 'MiniMax-M3') {
+          if (result.execution.provider?.model !== expectedRoutine.model) {
             throw new Error(`Unexpected completed model: ${result.execution.provider?.model}`);
           }
           if (result.execution.provider?.role !== 'routine') {
