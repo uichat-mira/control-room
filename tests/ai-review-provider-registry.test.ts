@@ -41,12 +41,16 @@ test("provider secret references are the only runtime credential configuration v
   ]);
 });
 
-test("CODE_REVIEW keeps only MiniMax routine enabled during the pilot", () => {
+test("CODE_REVIEW uses DeepSeek V4 Flash as the routine reviewer", () => {
   assert.deepEqual(REVIEW_ROUTING.routes.CODE_REVIEW, {
-    routine: { provider: "minimax-cn-codeplan", model: "m3", enabled: true },
-    fallback: {
+    routine: {
       provider: "opencode-go",
       model: "deepseek-v4-flash",
+      enabled: true,
+    },
+    fallback: {
+      provider: "minimax-cn-codeplan",
+      model: "m3",
       enabled: false,
     },
     escalation: {
@@ -73,7 +77,7 @@ test("provider credentials do not implicitly activate fallback or escalation", (
   assert.equal(registry.route.escalation?.state, "configured");
   assert.equal(registry.route.escalation?.enabled, false);
   assert.equal(registry.providers.length, 1);
-  assert.equal(registry.providers[0].id, "minimax-cn-codeplan/m3");
+  assert.equal(registry.providers[0].id, "opencode-go/deepseek-v4-flash");
 });
 
 test("PROMOTION_REVIEW and RELEASE_REVIEW are provisioned but disabled before rollout", () => {

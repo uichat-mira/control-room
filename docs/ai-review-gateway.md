@@ -199,8 +199,8 @@ Current routing intent is:
 
 ```text
 CODE_REVIEW
-  Routine     minimax-cn-codeplan / m3
-  Fallback    opencode-go / deepseek-v4-flash
+  Routine     opencode-go / deepseek-v4-flash
+  Fallback    minimax-cn-codeplan / m3
   Escalation  opencode-go / deepseek-v4-pro
 
 PROMOTION_REVIEW

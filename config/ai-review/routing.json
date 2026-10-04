@@ -3,13 +3,13 @@
   "routes": {
     "CODE_REVIEW": {
       "routine": {
-        "provider": "minimax-cn-codeplan",
-        "model": "m3",
+        "provider": "opencode-go",
+        "model": "deepseek-v4-flash",
         "enabled": true
       },
       "fallback": {
-        "provider": "opencode-go",
-        "model": "deepseek-v4-flash",
+        "provider": "minimax-cn-codeplan",
+        "model": "m3",
         "enabled": false
       },
       "escalation": {
