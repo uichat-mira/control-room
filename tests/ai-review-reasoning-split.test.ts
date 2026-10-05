@@ -99,6 +99,13 @@ test("MiniMax M3 keeps reasoning capability but disables thinking for routine re
   assert.notEqual(model.driverOptions?.openaiChat?.reasoningSplit, true);
 });
 
+test("DeepSeek V4.1 Flash disables thinking for structured review output", () => {
+  const model =
+    PROVIDER_CATALOG.providers["opencode-go"].models["deepseek-v4.1-flash"];
+  assert.equal(model.driverOptions?.openaiChat?.thinking, "disabled");
+  assert.equal(model.reviewDefaults?.maxOutputTokens, 4096);
+});
+
 test("openai-chat sends thinking disabled explicitly for MiniMax M3", async (t) => {
   const originalFetch = globalThis.fetch;
   let requestBody = "";
