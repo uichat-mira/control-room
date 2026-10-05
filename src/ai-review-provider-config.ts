@@ -28,6 +28,10 @@ export interface ProviderCredentialConfig {
 export interface ProviderTransportConfig {
   driver: ProviderTransportDriver;
   endpoint: string;
+  requestIdentity?: {
+    userAgent?: string;
+    sessionHeader?: string;
+  };
 }
 
 export interface OpenAIChatDriverOptions {
@@ -219,6 +223,28 @@ export function validateProviderConfiguration(
         throw new Error(`${providerId}/${transportId} uses an unsupported transport driver.`);
       }
       validateEndpoint(transport.endpoint, `${providerId}/${transportId}.endpoint`);
+      if (transport.requestIdentity?.userAgent !== undefined) {
+        nonEmpty(
+          transport.requestIdentity.userAgent,
+          `${providerId}/${transportId}.requestIdentity.userAgent`,
+        );
+        if (/[\r\n]/.test(transport.requestIdentity.userAgent)) {
+          throw new Error(
+            `${providerId}/${transportId}.requestIdentity.userAgent must be a single-line header value.`,
+          );
+        }
+      }
+      if (transport.requestIdentity?.sessionHeader !== undefined) {
+        nonEmpty(
+          transport.requestIdentity.sessionHeader,
+          `${providerId}/${transportId}.requestIdentity.sessionHeader`,
+        );
+        if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(transport.requestIdentity.sessionHeader)) {
+          throw new Error(
+            `${providerId}/${transportId}.requestIdentity.sessionHeader must be a valid HTTP header name.`,
+          );
+        }
+      }
     }
 
     for (const [modelKey, model] of Object.entries(provider.models)) {

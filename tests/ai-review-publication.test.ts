@@ -271,6 +271,31 @@ test("refuses to render REVIEW_UNAVAILABLE as a current review comment", () => {
   assert.match(renderReviewUnavailableComment(envelope), /`REVIEW_UNAVAILABLE`/);
 });
 
+test("renders safe upstream provider codes for unavailable reviews", () => {
+  const envelope = completedEnvelope({
+    execution: {
+      state: "REVIEW_UNAVAILABLE",
+      reason: "all_eligible_providers_failed",
+      attempts: [
+        {
+          provider: "opencode-go/deepseek-v4.1-flash",
+          model: "deepseek-v4.1-flash",
+          role: "routine",
+          status: "failed",
+          latencyMs: 42,
+          failureClass: "unknown",
+          upstreamCode: "MissingSessionID",
+          upstreamStatus: 400,
+        },
+      ],
+    },
+  });
+
+  const body = renderReviewUnavailableComment(envelope);
+  assert.match(body, /MissingSessionID/);
+  assert.match(body, /HTTP 400/);
+});
+
 test("fails closed instead of truncating an oversized normalized review comment", () => {
   const envelope = completedEnvelope();
   if (envelope.execution.state !== "COMPLETED") throw new Error("fixture");

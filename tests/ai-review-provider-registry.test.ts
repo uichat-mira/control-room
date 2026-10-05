@@ -27,6 +27,13 @@ test("catalog models provider accounts independently from review roles", () => {
     PROVIDER_CATALOG.providers["opencode-go"].models["deepseek-v4.1-flash"].modelId,
     "deepseek-v4.1-flash",
   );
+  assert.deepEqual(
+    PROVIDER_CATALOG.providers["opencode-go"].transports["openai-chat"].requestIdentity,
+    {
+      userAgent: "mira-ai-review/0",
+      sessionHeader: "x-opencode-session",
+    },
+  );
   assert.equal(
     PROVIDER_CATALOG.providers["opencode-go"].models["deepseek-v4-flash"].modelId,
     "deepseek-v4-flash",
@@ -117,6 +124,18 @@ test("provider review timeout is bounded by the adapter contract", () => {
   assert.throws(
     () => validateProviderConfiguration(catalog, REVIEW_ROUTING),
     /timeoutMs must be an integer between 1000 and 300000 ms/,
+  );
+});
+
+test("provider request identity rejects invalid HTTP header names", () => {
+  const catalog = structuredClone(PROVIDER_CATALOG);
+  catalog.providers["opencode-go"].transports["openai-chat"].requestIdentity = {
+    sessionHeader: "x-opencode-session\r\nx-injected",
+  };
+
+  assert.throws(
+    () => validateProviderConfiguration(catalog, REVIEW_ROUTING),
+    /requestIdentity\.sessionHeader must be a valid HTTP header name/,
   );
 });
 
