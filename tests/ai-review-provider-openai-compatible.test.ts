@@ -166,6 +166,46 @@ test("sends the minimal Chat Completions request and never puts the provider key
   });
 });
 
+test("sends configured client identity headers with a stable session per provider instance", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const capturedHeaders: Headers[] = [];
+
+  globalThis.fetch = async (_input, init) => {
+    capturedHeaders.push(new Headers(init?.headers));
+    return Response.json({
+      choices: [
+        {
+          message: {
+            content: '{"verdict":"NO_BLOCKING_FINDINGS","findings":[],"validationGaps":[]}',
+          },
+        },
+      ],
+    });
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const instance = provider({
+    requestIdentity: {
+      userAgent: "mira-ai-review/0",
+      sessionHeader: "x-opencode-session",
+    },
+  });
+
+  await instance.review(reviewPackage());
+  await instance.review(reviewPackage());
+
+  assert.equal(capturedHeaders.length, 2);
+  assert.equal(capturedHeaders[0].get("user-agent"), "mira-ai-review/0");
+  assert.equal(capturedHeaders[1].get("user-agent"), "mira-ai-review/0");
+  const firstSession = capturedHeaders[0].get("x-opencode-session");
+  const secondSession = capturedHeaders[1].get("x-opencode-session");
+  assert.ok(firstSession);
+  assert.equal(secondSession, firstSession);
+});
+
 test("can omit JSON mode for compatible providers that do not support response_format", async (t) => {
   const originalFetch = globalThis.fetch;
   let requestBody = "";
@@ -205,6 +245,36 @@ test("classifies 429 without copying provider response text into the error", asy
     (error: unknown) => {
       assert.ok(error instanceof ReviewProviderError);
       assert.equal(error.failureClass, "rate_limit");
+      assert.equal(error.message.includes("SECRET PROVIDER DETAIL"), false);
+      return true;
+    },
+  );
+});
+
+test("extracts a safe upstream error code without copying provider response text", async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        error: {
+          type: "MissingSessionID",
+          message: "SECRET PROVIDER DETAIL",
+        },
+      }),
+      { status: 400, headers: { "content-type": "application/json" } },
+    );
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  await assert.rejects(
+    () => provider().review(reviewPackage()),
+    (error: unknown) => {
+      assert.ok(error instanceof ReviewProviderError);
+      assert.equal(error.failureClass, "unknown");
+      assert.equal(error.upstreamStatus, 400);
+      assert.equal(error.upstreamCode, "MissingSessionID");
       assert.equal(error.message.includes("SECRET PROVIDER DETAIL"), false);
       return true;
     },
@@ -349,5 +419,17 @@ test("rejects provider endpoints with embedded credentials", () => {
   assert.throws(
     () => provider({ endpoint: "https://user:pass@provider.example/v1/chat/completions" }),
     /must not contain embedded credentials/,
+  );
+});
+
+test("rejects invalid configured session header names", () => {
+  assert.throws(
+    () =>
+      provider({
+        requestIdentity: {
+          sessionHeader: "x-opencode-session\r\nx-injected",
+        },
+      }),
+    /valid HTTP header name/,
   );
 });

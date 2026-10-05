@@ -23,6 +23,10 @@ export interface OpenAICompatibleReviewProviderConfig {
   model: string;
   timeoutMs?: number;
   responseFormat?: "json_object" | "none";
+  requestIdentity?: {
+    userAgent?: string;
+    sessionHeader?: string;
+  };
   requestExtensions?: {
     reasoningSplit?: boolean;
     thinking?: OpenAICompatibleThinkingMode;
@@ -54,6 +58,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 300_000;
 const MAX_PROVIDER_RESPONSE_BYTES = 512_000;
+const MAX_PROVIDER_ERROR_BYTES = 16_384;
 
 function requireNonEmpty(value: string, label: string) {
   const trimmed = value.trim();
@@ -122,6 +127,30 @@ function normalizeOutputBudget(
   };
 }
 
+function normalizeRequestIdentity(
+  value: OpenAICompatibleReviewProviderConfig["requestIdentity"],
+): { userAgent?: string; sessionHeader?: string } | undefined {
+  if (!value) return undefined;
+  const userAgent =
+    value.userAgent === undefined
+      ? undefined
+      : requireNonEmpty(value.userAgent, "Provider User-Agent");
+  const sessionHeader =
+    value.sessionHeader === undefined
+      ? undefined
+      : requireNonEmpty(value.sessionHeader, "Provider session header");
+  if (userAgent && /[\r\n]/.test(userAgent)) {
+    throw new Error("Provider User-Agent must be a single-line header value.");
+  }
+  if (sessionHeader && !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(sessionHeader)) {
+    throw new Error("Provider session header must be a valid HTTP header name.");
+  }
+  return {
+    ...(userAgent ? { userAgent } : {}),
+    ...(sessionHeader ? { sessionHeader } : {}),
+  };
+}
+
 function normalizeRequestExtensions(
   value: OpenAICompatibleReviewProviderConfig["requestExtensions"],
 ): { reasoningSplit?: true; thinking?: OpenAICompatibleThinkingMode } | undefined {
@@ -178,13 +207,16 @@ function malformed(
   });
 }
 
-async function readBoundedResponseText(response: Response) {
+async function readBoundedResponseText(
+  response: Response,
+  maxBytes = MAX_PROVIDER_RESPONSE_BYTES,
+) {
   const contentLength = response.headers.get("content-length");
   const declaredLength = contentLength === null ? undefined : Number(contentLength);
   if (
     declaredLength !== undefined &&
     Number.isFinite(declaredLength) &&
-    declaredLength > MAX_PROVIDER_RESPONSE_BYTES
+    declaredLength > maxBytes
   ) {
     throw malformed(
       "Provider response exceeded the review output limit.",
@@ -204,7 +236,7 @@ async function readBoundedResponseText(response: Response) {
       const { done, value } = await reader.read();
       if (done) break;
       totalBytes += value.byteLength;
-      if (totalBytes > MAX_PROVIDER_RESPONSE_BYTES) {
+      if (totalBytes > maxBytes) {
         try {
           await reader.cancel();
         } catch {
@@ -265,6 +297,40 @@ function parseProviderJson(content: string, usage?: ReviewProviderUsage) {
   }
 }
 
+function safeUpstreamCode(value: unknown) {
+  return typeof value === "string" && /^[A-Za-z0-9._:-]{1,80}$/.test(value)
+    ? value
+    : undefined;
+}
+
+function upstreamErrorCode(content: string) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+
+  const root = parsed as Record<string, unknown>;
+  const nested =
+    root.error && typeof root.error === "object" && !Array.isArray(root.error)
+      ? (root.error as Record<string, unknown>)
+      : undefined;
+  for (const candidate of [
+    root.code,
+    root.type,
+    root.name,
+    nested?.code,
+    nested?.type,
+    nested?.name,
+  ]) {
+    const code = safeUpstreamCode(candidate);
+    if (code) return code;
+  }
+  return undefined;
+}
+
 export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPackage> {
   readonly id: string;
   readonly model: string;
@@ -274,6 +340,10 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
   readonly #apiKey: string;
   readonly #timeoutMs: number;
   readonly #responseFormat: "json_object" | "none";
+  readonly #requestIdentity:
+    | { userAgent?: string; sessionHeader?: string }
+    | undefined;
+  readonly #sessionId: string | undefined;
   readonly #requestExtensions:
     | { reasoningSplit?: true; thinking?: OpenAICompatibleThinkingMode }
     | undefined;
@@ -290,6 +360,10 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
     this.model = requireNonEmpty(config.model, "Provider model");
     this.#timeoutMs = normalizeTimeout(config.timeoutMs);
     this.#responseFormat = config.responseFormat ?? "json_object";
+    this.#requestIdentity = normalizeRequestIdentity(config.requestIdentity);
+    this.#sessionId = this.#requestIdentity?.sessionHeader
+      ? crypto.randomUUID()
+      : undefined;
     this.#requestExtensions = normalizeRequestExtensions(config.requestExtensions);
     this.#inputBudget = normalizeInputBudget(config.inputBudget);
     this.#outputBudget = normalizeOutputBudget(config.outputBudget);
@@ -318,12 +392,20 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
     try {
       let response: Response;
       try {
+        const headers = new Headers({
+          Authorization: `Bearer ${this.#apiKey}`,
+          "Content-Type": "application/json",
+        });
+        if (this.#requestIdentity?.userAgent) {
+          headers.set("User-Agent", this.#requestIdentity.userAgent);
+        }
+        if (this.#requestIdentity?.sessionHeader && this.#sessionId) {
+          headers.set(this.#requestIdentity.sessionHeader, this.#sessionId);
+        }
+
         response = await fetch(this.#endpoint, {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${this.#apiKey}`,
-            "Content-Type": "application/json",
-          },
+          headers,
           body: JSON.stringify({
             model: this.model,
             messages: prompt.messages,
@@ -354,10 +436,21 @@ export class OpenAICompatibleReviewProvider implements ReviewProvider<ReviewPack
       }
 
       if (!response.ok) {
+        let upstreamCode: string | undefined;
+        try {
+          upstreamCode = upstreamErrorCode(
+            await readBoundedResponseText(response, MAX_PROVIDER_ERROR_BYTES),
+          );
+        } catch {
+          // HTTP status remains authoritative if provider diagnostics are unreadable or oversized.
+        }
         throw new ReviewProviderError(
           `Provider request failed with HTTP ${response.status}.`,
           failureClassForHttpStatus(response.status),
-          { upstreamStatus: response.status },
+          {
+            upstreamStatus: response.status,
+            ...(upstreamCode ? { upstreamCode } : {}),
+          },
         );
       }
 

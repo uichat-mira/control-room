@@ -79,6 +79,7 @@ jobs:
             normalizationReason: attempt.normalizationReason ?? null,
             normalizationPath: attempt.normalizationPath ?? null,
             upstreamStatus: attempt.upstreamStatus ?? null,
+            upstreamCode: attempt.upstreamCode ?? null,
             usage: attempt.usage ?? null,
           }));
 

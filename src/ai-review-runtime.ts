@@ -99,6 +99,7 @@ export interface ProviderAttempt {
   normalizationReason?: ReviewNormalizationReason;
   normalizationPath?: string;
   upstreamStatus?: number;
+  upstreamCode?: string;
   usage?: ReviewProviderUsage;
 }
 
@@ -126,6 +127,7 @@ export class ReviewProviderError extends Error {
   readonly failureClass: ReviewFailureClass;
   readonly failureDetail: ReviewFailureDetail | undefined;
   readonly upstreamStatus: number | undefined;
+  readonly upstreamCode: string | undefined;
   readonly usage: ReviewProviderUsage | undefined;
 
   constructor(
@@ -134,6 +136,7 @@ export class ReviewProviderError extends Error {
     options: {
       failureDetail?: ReviewFailureDetail;
       upstreamStatus?: number;
+      upstreamCode?: string;
       usage?: ReviewProviderUsage;
     } = {},
   ) {
@@ -142,6 +145,7 @@ export class ReviewProviderError extends Error {
     this.failureClass = failureClass;
     this.failureDetail = options.failureDetail;
     this.upstreamStatus = options.upstreamStatus;
+    this.upstreamCode = options.upstreamCode;
     this.usage = options.usage;
   }
 }
@@ -385,6 +389,7 @@ function technicalFailure(
   normalizationReason?: ReviewNormalizationReason;
   normalizationPath?: string;
   upstreamStatus?: number;
+  upstreamCode?: string;
   usage?: ReviewProviderUsage;
 } {
   if (error instanceof ReviewProviderError) {
@@ -392,6 +397,7 @@ function technicalFailure(
       failureClass: error.failureClass,
       ...(error.failureDetail ? { failureDetail: error.failureDetail } : {}),
       ...(error.upstreamStatus !== undefined ? { upstreamStatus: error.upstreamStatus } : {}),
+      ...(error.upstreamCode ? { upstreamCode: error.upstreamCode } : {}),
       ...(error.usage ?? providerUsage ? { usage: error.usage ?? providerUsage } : {}),
     };
   }
