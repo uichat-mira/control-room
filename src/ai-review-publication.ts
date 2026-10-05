@@ -222,6 +222,7 @@ function renderAttemptDiagnostics(attempt: ReviewExecutionEnvelope["execution"][
     attempt.failureDetail,
     attempt.normalizationReason,
     attempt.normalizationPath,
+    attempt.upstreamCode,
     typeof attempt.upstreamStatus === "number" ? `HTTP ${attempt.upstreamStatus}` : undefined,
   ].filter((value): value is string => Boolean(value));
   return parts.length ? ` · ${parts.map(safeInline).join(" · ")}` : "";
