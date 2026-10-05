@@ -91,6 +91,11 @@
             "reasoning": "provider-default",
             "responseFormat": "none"
           },
+          "driverOptions": {
+            "openaiChat": {
+              "thinking": "disabled"
+            }
+          },
           "reviewDefaults": {
             "maxPromptCharacters": 250000,
             "maxOutputTokens": 4096,
