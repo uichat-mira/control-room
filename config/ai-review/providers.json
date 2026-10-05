@@ -68,7 +68,11 @@
       "transports": {
         "openai-chat": {
           "driver": "openai-chat",
-          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions"
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "requestIdentity": {
+            "userAgent": "mira-ai-review/0",
+            "sessionHeader": "x-opencode-session"
+          }
         },
         "openai-responses": {
           "driver": "openai-responses",
