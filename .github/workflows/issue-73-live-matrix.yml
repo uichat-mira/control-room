@@ -1,0 +1,60 @@
+name: "#73 Final Progressive Disclosure Matrix"
+
+on:
+  push:
+    branches:
+      - "agent/issue-73-run-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-73-final-progressive-disclosure-matrix-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: ${{ secrets.AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY }}
+      AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY: ${{ secrets.AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY }}
+      AI_PROVIDER_OPENCODE_GO_KEY: ${{ secrets.AI_PROVIDER_OPENCODE_GO_KEY }}
+      MIRA_AGENT_TARGET: opencode-go/deepseek-v4.1-flash
+      MIRA_RESOLVER_TARGET: opencode-go/deepseek-v4.1-flash
+      MIRA_CASE_LIMIT: "16"
+      MIRA_RESEARCH_OUTPUT_DIR: research-results
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run final real-model matrix
+        run: node src/research/progressive-agent-eval.ts
+
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f research-results/issue-243-progressive-agent-eval.md ]; then
+            cat research-results/issue-243-progressive-agent-eval.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload research evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-73-final-progressive-disclosure-matrix
+          path: research-results/
+          if-no-files-found: warn
