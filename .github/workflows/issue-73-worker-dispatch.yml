@@ -1,0 +1,27 @@
+name: Dispatch #73 Research Harness Worker
+
+on:
+  push:
+    branches:
+      - chore/issue-73-worker-dispatch
+    paths:
+      - .github/workflows/issue-73-worker-dispatch.yml
+
+permissions:
+  contents: write
+  issues: read
+  pull-requests: write
+
+jobs:
+  worker:
+    uses: uichat-mira/.github/.github/workflows/mira-external-worker.yml@3e21560100eb3261a3ba76088060feb89b42e0a4
+    with:
+      issue_number: 73
+      base_branch: chore/issue-73-worker-dispatch
+      verification_command: |
+        npm install --no-audit --no-fund
+        npm run typecheck
+      provider: opencode-go
+      model: deepseek-v4.1-flash
+    secrets:
+      opencode_go_api_key: ${{ secrets.AI_PROVIDER_OPENCODE_GO_KEY }}
