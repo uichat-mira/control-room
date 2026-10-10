@@ -1,0 +1,88 @@
+name: "#243 Progressive Agent Gateway Probe"
+
+on:
+  push:
+    branches:
+      - chore/issue-243-progressive-agent-eval
+    paths:
+      - src/research/progressive-agent-eval.ts
+      - config/ai-review/providers.json
+      - .github/workflows/research-progressive-agent-eval.yml
+  workflow_dispatch:
+    inputs:
+      agent_target:
+        description: "Gateway provider/model for the Main Agent"
+        required: false
+        default: "opencode-go/deepseek-v4-pro"
+      resolver_target:
+        description: "Gateway provider/model for the Resolver"
+        required: false
+        default: "opencode-go/deepseek-v4.1-flash"
+      case_limit:
+        description: "Number of representative cases (1-8)"
+        required: false
+        default: "4"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-243-progressive-agent-gateway-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Real-model progressive resolution
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY: ${{ secrets.AI_PROVIDER_MINIMAX_CN_CODEPLAN_KEY }}
+      AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY: ${{ secrets.AI_PROVIDER_VOLCENGINE_CODING_PLAN_KEY }}
+      AI_PROVIDER_OPENCODE_GO_KEY: ${{ secrets.AI_PROVIDER_OPENCODE_GO_KEY }}
+      MIRA_AGENT_TARGET: ${{ inputs.agent_target || 'opencode-go/deepseek-v4-pro' }}
+      MIRA_RESOLVER_TARGET: ${{ inputs.resolver_target || 'opencode-go/deepseek-v4.1-flash' }}
+      MIRA_CASE_LIMIT: ${{ inputs.case_limit || '4' }}
+      MIRA_RESEARCH_OUTPUT_DIR: research-results
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Validate provider targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${AI_PROVIDER_OPENCODE_GO_KEY:-}"
+          echo "Agent target: ${MIRA_AGENT_TARGET}"
+          echo "Resolver target: ${MIRA_RESOLVER_TARGET}"
+          echo "Case limit: ${MIRA_CASE_LIMIT}"
+
+      - name: Run real-model #243 probe
+        run: node src/research/progressive-agent-eval.ts
+
+      - name: Publish job summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f research-results/issue-243-progressive-agent-eval.md ]; then
+            cat research-results/issue-243-progressive-agent-eval.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload research evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-243-progressive-agent-gateway-probe
+          path: research-results/
+          if-no-files-found: warn
