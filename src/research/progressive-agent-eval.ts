@@ -297,16 +297,16 @@ async function callJson(
   if (target.userAgent) headers.set("User-Agent", target.userAgent);
   if (target.sessionHeader) headers.set(target.sessionHeader, crypto.randomUUID());
 
-  const maxOutput = role === "resolver" ? 900 : 1200;
   const body: Record<string, unknown> = {
     model: target.modelId,
     messages,
   };
-  if (target.outputTokenParameter) {
-    body[target.outputTokenParameter] = Math.min(
-      maxOutput,
-      target.maxOutputTokens ?? maxOutput,
-    );
+  if (target.outputTokenParameter && target.maxOutputTokens) {
+    // Preserve the Gateway-owned model output budget. Reasoning-capable models
+    // may consume a material part of this budget before emitting final JSON;
+    // imposing a smaller research-only cap can create false "no content"
+    // failures that say nothing about the topology being measured.
+    body[target.outputTokenParameter] = target.maxOutputTokens;
   }
   if (target.thinking !== undefined) {
     body.thinking = { type: target.thinking };
