@@ -94,9 +94,11 @@ function factoryCacheKey(request: Request, repository: string, runId: number) {
 
 function factoryCacheTtl(snapshot: FactoryRunProjection) {
   if (snapshot.run.status !== "completed") return 15;
-  if (snapshot.reporter.status === "available" && snapshot.reporter.events.length > 0) return 60 * 60;
-  if (snapshot.run.conclusion === "skipped") return 10 * 60;
-  return 60;
+  if (snapshot.reporter.status === "available" && snapshot.reporter.events.length > 0) return 6 * 60 * 60;
+  if (snapshot.reporter.status === "not_expected" || snapshot.run.conclusion === "skipped") return 10 * 60;
+  if (snapshot.reporter.status === "unavailable") return 5 * 60;
+  if (snapshot.reporter.status === "expired") return 60 * 60;
+  return 10 * 60;
 }
 
 async function cachedFactoryRun(
