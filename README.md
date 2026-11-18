@@ -113,7 +113,6 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 - `/runtime` — live service probes, Workers, Pages, and 24-hour traffic/error analytics
 - `/governance` — Issues, pull requests, default-branch protection, rulesets, and public Projects
 - `/wall` — large-screen operations view; forced dark theme and 60-second refresh
-- `/factory` — an independent immersive Factory TV display mode, **peer to `/wall`**, not an ordinary business-tab page
 - `/factory` — Factory TV front-end design demo: industrial CCTV-style station wall, with selectable synthetic workstations; opened in an immersive display shell beside `/wall`
 - `/factory/demo-01` (and `demo-02`, `demo-03`) — single-station timeline demo using explicitly synthetic events
 - `/factory/broadcast` — fact-based industrial satire / broadcast copy demo (not live telemetry)
