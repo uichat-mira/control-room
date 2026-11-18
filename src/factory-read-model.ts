@@ -108,7 +108,7 @@ export interface FactoryRunProjection {
   artifacts: FactoryArtifact[];
   pullRequests: FactoryPullRequest[];
   reporter: {
-    status: "available" | "unavailable" | "expired" | "not_configured";
+    status: "available" | "unavailable" | "expired" | "not_configured" | "not_expected";
     freshness: FactoryFreshness;
     events: FactoryEvent[];
     observedAt: string | null;
@@ -283,6 +283,7 @@ function deriveState(
   jobs: FactoryJob[],
   artifacts: FactoryArtifact[],
   events: FactoryEvent[],
+  reporterStatus: FactoryRunProjection["reporter"]["status"],
 ): { state: FactoryState; repairRound: number | null } {
   const latest = [...events].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0];
 
@@ -295,7 +296,21 @@ function deriveState(
   if (latest?.stage === "repair" && latest.outcome === "returned") {
     return { state: "repairing", repairRound: parseRepairRound(latest.errorCode) };
   }
-  if (latest?.kind === "verify.passed") return { state: "verified", repairRound: null };
+
+  const latestOccurredAt = latest ? Date.parse(latest.occurredAt) : NaN;
+  const laterVerifyFailure = jobs.some((job) => {
+    if (!/verify|validation/i.test(job.name)) return false;
+    if (!["failure", "timed_out", "startup_failure"].includes(job.conclusion ?? "")) return false;
+    if (!latest || !Number.isFinite(latestOccurredAt)) return true;
+    const completedAt = job.completedAt ? Date.parse(job.completedAt) : NaN;
+    return !Number.isFinite(completedAt) || completedAt >= latestOccurredAt;
+  });
+
+  if (latest?.kind === "verify.passed") {
+    return laterVerifyFailure
+      ? { state: "validation_gap", repairRound: null }
+      : { state: "verified", repairRound: null };
+  }
   if (latest?.kind === "delivery.failed") return { state: "delivery_retry", repairRound: null };
   if (latest?.kind === "delivery.draft_pr_created") return { state: "delivered", repairRound: null };
   if (latest?.kind === "verify.failed") return { state: "validation_gap", repairRound: null };
@@ -311,12 +326,11 @@ function deriveState(
 
   if (run.status === "queued") return { state: "queued", repairRound: null };
 
-  const artifactExpected = jobs.some((job) =>
-    /candidate|verify|delivery|evidence|handoff/i.test(job.name),
-  );
-  if (
+  const executedRun =
     run.status === "completed" &&
-    artifactExpected &&
+    ["success", "failure", "timed_out", "startup_failure"].includes(run.conclusion ?? "");
+  if (
+    executedRun &&
     (artifacts.length === 0 || artifacts.some((artifact) => artifact.expired))
   ) {
     return { state: "artifact_unavailable", repairRound: null };
@@ -329,14 +343,14 @@ function deriveState(
     return { state: "worker_failed", repairRound: null };
   }
 
-  if (
-    run.status === "completed" &&
-    ["skipped", "cancelled", "neutral", "action_required"].includes(run.conclusion ?? "")
-  ) {
-    return { state: "observation_gap", repairRound: null };
+  if (reporterStatus === "expired") {
+    return { state: "logs_expired", repairRound: null };
   }
 
-  if (run.status === "completed" && run.conclusion === "success") {
+  if (
+    run.status === "completed" &&
+    ["skipped", "cancelled", "neutral", "action_required", "success"].includes(run.conclusion ?? "")
+  ) {
     return { state: "observation_gap", repairRound: null };
   }
 
@@ -346,9 +360,7 @@ function deriveState(
 function githubFreshness(run: GitHubRun, now: number): FactoryFreshness {
   const updated = Date.parse(run.updated_at);
   if (!Number.isFinite(updated)) return "unavailable";
-  if (now - updated > REPORTER_RETENTION_MS) return "expired";
-  if (now - updated > 10 * 60 * 1000) return "stale";
-  return "fresh";
+  return now - updated > 10 * 60 * 1000 ? "stale" : "fresh";
 }
 
 function reporterFreshness(run: GitHubRun, now: number): FactoryFreshness {
@@ -381,7 +393,7 @@ async function reporterEvents(
     run.status !== "completed" ||
     ["skipped", "cancelled", "neutral", "action_required"].includes(run.conclusion ?? "")
   ) {
-    return { status: "unavailable", freshness, events: [], observedAt: null };
+    return { status: "not_expected", freshness, events: [], observedAt: null };
   }
 
   const createdAt = Date.parse(run.created_at);
@@ -426,10 +438,10 @@ async function reporterEvents(
         level: source.level ?? "info",
         errorCode: source.error_code ?? null,
         issueNumber: source.issue_number ?? null,
-        evidence: source.evidence_ref?.id
+        evidence: source.event_id || source.evidence_ref?.id
           ? evidence(
               "haomai-event",
-              source.event_id ?? source.evidence_ref.id,
+              source.event_id ?? source.evidence_ref!.id,
               null,
               source.occurred_at ?? source.received_at ?? new Date(now).toISOString(),
             )
@@ -539,7 +551,7 @@ export async function getFactoryRunProjection(
     }));
 
   const issueNumber = reporter.events.find((event) => event.issueNumber != null)?.issueNumber ?? null;
-  const derived = deriveState(run, jobs, artifacts, reporter.events);
+  const derived = deriveState(run, jobs, artifacts, reporter.events, reporter.status);
 
   return {
     apiVersion: "v1",
@@ -580,6 +592,7 @@ export async function getFactoryRunProjection(
     reporter,
     warnings: [
       ...(reporter.status === "unavailable" ? ["Reporter unavailable; GitHub remains the lifecycle source."] : []),
+      ...(reporter.status === "not_expected" ? ["Reporter is not expected for this run state; GitHub remains the lifecycle source."] : []),
       ...(reporter.status === "expired" ? ["Reporter logs expired; historical lifecycle evidence remains in GitHub where available."] : []),
       ...(reporter.status === "available" && reporter.events.length === 0
         ? ["Reporter query succeeded, but no trusted event was observed for this run attempt; this is an observation gap, not a Worker failure."]
