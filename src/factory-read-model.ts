@@ -385,6 +385,7 @@ async function reporterEvents(
       view: "events",
       limit: 100,
       parameters: {
+        datasets: ["workers"],
         filterCombination: "and",
         filters: [
           { key: "$metadata.service", operation: "eq", type: "string", value: REPORTER_SCRIPT },
@@ -423,7 +424,7 @@ async function reporterEvents(
       .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 
     return {
-      status: events.length > 0 ? "available" : "unavailable",
+      status: "available",
       freshness,
       events,
       observedAt: events.at(-1)?.occurredAt ?? null,
@@ -566,6 +567,9 @@ export async function getFactoryRunProjection(
     warnings: [
       ...(reporter.status === "unavailable" ? ["Reporter unavailable; GitHub remains the lifecycle source."] : []),
       ...(reporter.status === "expired" ? ["Reporter logs expired; historical lifecycle evidence remains in GitHub where available."] : []),
+      ...(reporter.status === "available" && reporter.events.length === 0
+        ? ["Reporter query succeeded, but no trusted event was observed for this run attempt; this is an observation gap, not a Worker failure."]
+        : []),
       ...(artifacts.some((artifact) => artifact.expired) ? ["One or more GitHub Artifacts are expired."] : []),
       ...(run.status === "completed" && run.conclusion === "success" && reporter.events.length === 0
         ? ["GitHub Run succeeded, but no trusted Verify/Delivery event was observed; this is not a verified product outcome."]
