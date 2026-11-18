@@ -99,8 +99,7 @@ test("projects trusted Reporter Verify PASS as verified without exposing raw tel
   assert.equal(projection.issueNumber, 84);
   assert.equal(projection.reporter.status, "available");
   assert.equal(projection.reporter.events[0]?.kind, "verify.passed");
-  assert.equal(JSON.stringify(projection), JSON.stringify(projection).replace("must-not-leak", "must-not-leak"));
-  assert.doesNotMatch(JSON.stringify(projection), /sensitive_secret/);
+  assert.doesNotMatch(JSON.stringify(projection), /sensitive_secret|must-not-leak/);
   assert.equal(projection.provenance.some((item) => item.id === "evt-1"), true);
 });
 
