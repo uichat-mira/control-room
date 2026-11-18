@@ -170,27 +170,26 @@ interface CloudflareEnvelope<T> {
 interface HaomaiQueryResult {
   events?: {
     events?: Array<{
-        source?: {
-          event?: string;
-          schema?: string;
-          received_at?: string;
-          app_id?: string;
-          trust_class?: string;
-          level?: string;
-          event_id?: string;
-          occurred_at?: string;
-          kind?: string;
-          repository?: string;
-          issue_number?: number;
-          run_id?: string;
-          run_attempt?: number;
-          stage?: string;
-          outcome?: string;
-          evidence_ref?: { type?: string; id?: string };
-          error_code?: string;
-        };
-      }>;
-    };
+      source?: {
+        event?: string;
+        schema?: string;
+        received_at?: string;
+        app_id?: string;
+        trust_class?: string;
+        level?: string;
+        event_id?: string;
+        occurred_at?: string;
+        kind?: string;
+        repository?: string;
+        issue_number?: number;
+        run_id?: string;
+        run_attempt?: number;
+        stage?: string;
+        outcome?: string;
+        evidence_ref?: { type?: string; id?: string };
+        error_code?: string;
+      };
+    }>;
   };
 }
 
