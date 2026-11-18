@@ -127,6 +127,7 @@ test("Reporter evidence from a previous run attempt is ignored", async () => {
 
   const projection = await getFactoryRunProjection(githubEnv, cloudflareEnv, "uichat-mira/mira-mobile", 123, Date.parse("2026-11-18T06:12:30Z"));
 
+  assert.equal(projection.reporter.status, "not_expected");
   assert.equal(projection.reporter.events.length, 0);
   assert.equal(projection.state, "observation_gap");
 });
@@ -175,6 +176,49 @@ test("Skipped Worker runs do not trigger an Observability scan", async () => {
 
   assert.equal(projection.reporter.events.length, 0);
   assert.equal(projection.state, "observation_gap");
+});
+
+test("Reporter Verify PASS cannot override a later GitHub Verify failure", async () => {
+  network.use(
+    ...githubHandlers({
+      jobs: [
+        {
+          id: 1,
+          name: "verify",
+          status: "completed",
+          conclusion: "failure",
+          started_at: "2026-11-18T06:10:30Z",
+          completed_at: "2026-11-18T06:11:30Z",
+        },
+      ],
+    }),
+    reporterHandler({
+      schema: "haomai.telemetry.v1",
+      app_id: "mira-worker-reporter",
+      trust_class: "trusted_pipeline",
+      repository: "uichat-mira/mira-mobile",
+      issue_number: 84,
+      run_id: "123",
+      run_attempt: 2,
+      occurred_at: "2026-11-18T06:11:00Z",
+      kind: "verify.passed",
+      stage: "verify",
+      outcome: "passed",
+      level: "info",
+      event_id: "evt-conflict",
+      error_code: null,
+    }),
+  );
+
+  const projection = await getFactoryRunProjection(
+    githubEnv,
+    cloudflareEnv,
+    "uichat-mira/mira-mobile",
+    123,
+    Date.parse("2026-11-18T06:12:30Z"),
+  );
+
+  assert.equal(projection.state, "validation_gap");
 });
 
 test("Reporter outage becomes observation gap, never Worker failure or Verify PASS", async () => {
@@ -229,7 +273,8 @@ test("Expired Reporter retention remains separate from GitHub evidence", async (
   );
 
   assert.equal(projection.reporter.status, "expired");
-  assert.equal(projection.state, "observation_gap");
+  assert.equal(projection.state, "logs_expired");
+  assert.equal(projection.freshness, "stale");
   assert.equal(projection.provenance.some((item) => item.source === "github-run"), true);
 });
 
@@ -265,6 +310,26 @@ test("Expired artifacts are explicit evidence loss, not success", async () => {
 
   assert.equal(projection.state, "artifact_unavailable");
   assert.equal(projection.artifacts[0]?.expired, true);
+});
+
+test("Executed Worker run with no durable artifacts is explicit evidence loss", async () => {
+  network.use(
+    ...githubHandlers({ artifacts: [] }),
+    http.post(
+      "https://api.cloudflare.com/client/v4/accounts/account/workers/observability/telemetry/query",
+      () => new HttpResponse("unavailable", { status: 503 }),
+    ),
+  );
+
+  const projection = await getFactoryRunProjection(
+    githubEnv,
+    cloudflareEnv,
+    "uichat-mira/mira-mobile",
+    123,
+    Date.parse("2026-11-18T06:12:30Z"),
+  );
+
+  assert.equal(projection.state, "artifact_unavailable");
 });
 
 test("Private repositories are rejected before exposing Actions data", async () => {
