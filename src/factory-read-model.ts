@@ -450,23 +450,23 @@ async function reporterEvents(
       .filter((source) => source.run_id === String(run.id))
       .filter((source) => source.run_attempt == null || source.run_attempt === run.run_attempt)
       .filter((source) => source.schema === "haomai.telemetry.v1")
-      .map((source) => ({
-        occurredAt: source.occurred_at ?? source.received_at ?? new Date(now).toISOString(),
-        kind: source.kind ?? "unknown",
-        stage: source.stage ?? "unknown",
-        outcome: source.outcome ?? "unknown",
-        level: source.level ?? "info",
-        errorCode: source.error_code ?? null,
-        issueNumber: source.issue_number ?? null,
-        evidence: source.event_id || source.evidence_ref?.id
-          ? evidence(
-              "haomai-event",
-              source.event_id ?? source.evidence_ref!.id,
-              null,
-              source.occurred_at ?? source.received_at ?? new Date(now).toISOString(),
-            )
-          : null,
-      }))
+      .map((source) => {
+        const evidenceId = source.event_id ?? source.evidence_ref?.id ?? null;
+        const occurredAt =
+          source.occurred_at ?? source.received_at ?? new Date(now).toISOString();
+        return {
+          occurredAt,
+          kind: source.kind ?? "unknown",
+          stage: source.stage ?? "unknown",
+          outcome: source.outcome ?? "unknown",
+          level: source.level ?? "info",
+          errorCode: source.error_code ?? null,
+          issueNumber: source.issue_number ?? null,
+          evidence: evidenceId
+            ? evidence("haomai-event", evidenceId, null, occurredAt)
+            : null,
+        };
+      })
       .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 
     return {
