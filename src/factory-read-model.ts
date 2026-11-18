@@ -8,6 +8,8 @@ const REPORTER_SCRIPT = "how-am-i";
 const REPORTER_APP_ID = "mira-worker-reporter";
 const REPORTER_TRUST_CLASS = "trusted_pipeline";
 const REPORTER_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const REPORTER_QUERY_LOOKBACK_MS = 3 * 60 * 1000;
+const REPORTER_QUERY_GRACE_MS = 60 * 1000;
 
 export type FactoryState =
   | "queued"
@@ -372,8 +374,17 @@ async function reporterEvents(
     return { status: "expired", freshness, events: [], observedAt: null };
   }
 
-  const from = Math.max(0, Date.parse(run.created_at) - 10 * 60 * 1000);
-  const to = Math.min(now, Date.parse(run.updated_at) + 10 * 60 * 1000);
+  // The trusted_reporter job runs once, at the end of the reusable Worker lifecycle.
+  // Do not scan the whole Worker run: active runs have no Reporter evidence yet, and
+  // completed runs only need a narrow tail window around the final GitHub update.
+  if (run.status !== "completed") {
+    return { status: "unavailable", freshness, events: [], observedAt: null };
+  }
+
+  const createdAt = Date.parse(run.created_at);
+  const updatedAt = Date.parse(run.updated_at);
+  const from = Math.max(createdAt, updatedAt - REPORTER_QUERY_LOOKBACK_MS);
+  const to = Math.min(now, updatedAt + REPORTER_QUERY_GRACE_MS);
   if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) {
     return { status: "unavailable", freshness: "unavailable", events: [], observedAt: null };
   }
