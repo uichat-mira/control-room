@@ -161,7 +161,13 @@ export default function FactoryTV() {
       <header className="factory-masthead">
         <div className="factory-masthead-top">
           <span className="factory-micro"><Radio size={12} aria-hidden="true" /> MIRA / CONTROL ROOM / CHANNEL 05</span>
-          <span className="factory-demo-label">DESIGN DEMO · NON-LIVE</span>
+          <div className="factory-masthead-actions">
+            <span className="factory-demo-label">DESIGN DEMO · NON-LIVE</span>
+            <nav className="factory-display-switch" aria-label="展示模式与控制台入口">
+              <Link to="/">返回控制台</Link>
+              <Link to="/wall">Mira System 大屏 <ExternalLink size={12} aria-hidden="true" /></Link>
+            </nav>
+          </div>
         </div>
         <div className="factory-masthead-main">
           <div><h2>血汗工厂 <em>TV</em></h2><div className="factory-red-rule" /></div>
