@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, NavLink, useLocation, useParams, useSearchParams } from "react-router";
-import { Activity, ArrowRight, Check, CircleAlert, Clock3, ExternalLink, Radio, ShieldCheck } from "lucide-react";
+import { Activity, ArrowRight, CircleAlert, Clock3, ExternalLink, Radio, ShieldCheck } from "lucide-react";
 import type { FactoryRunProjection, FactoryState } from "./factory-read-model";
 import "./factory-tv.css";
 
@@ -12,7 +12,7 @@ type Fact = { at: string; title: string; detail: string; tone: "normal" | "warni
 type Station = {
   id: string; camera: string; repository: string; task: string; model: string;
   headline: string; status: string; tone: Tone; duration: string; lastEvidence: string;
-  track: [Track, Track, Track, Track]; facts: Fact[]; broadcast: string;
+  track: [Track, Track, Track, Track]; facts: Fact[]; broadcast: string; mode?: "demo" | "real";
 };
 
 const stations: Station[] = [
