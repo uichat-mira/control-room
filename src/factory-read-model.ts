@@ -277,6 +277,27 @@ function parseRepairRound(errorCode: string | null): number | null {
   return null;
 }
 
+function reporterStateCandidate(
+  event: FactoryEvent,
+): { state: FactoryState; repairRound: number | null } | null {
+  if (event.stage === "repair" && event.outcome === "escalated") {
+    return { state: "escalated", repairRound: parseRepairRound(event.errorCode) ?? 2 };
+  }
+  if (event.stage === "repair" && event.outcome === "blocked") {
+    return { state: "blocked", repairRound: parseRepairRound(event.errorCode) };
+  }
+  if (event.stage === "repair" && event.outcome === "returned") {
+    return { state: "repairing", repairRound: parseRepairRound(event.errorCode) };
+  }
+  if (event.kind === "delivery.draft_pr_created") return { state: "delivered", repairRound: null };
+  if (event.kind === "delivery.failed") return { state: "delivery_retry", repairRound: null };
+  if (event.kind === "verify.passed") return { state: "verified", repairRound: null };
+  if (event.kind === "verify.failed") return { state: "validation_gap", repairRound: null };
+  if (event.kind === "candidate.captured") return { state: "candidate_captured", repairRound: null };
+  if (event.kind === "worker.failed") return { state: "worker_failed", repairRound: null };
+  return null;
+}
+
 function deriveState(
   run: GitHubRun,
   jobs: FactoryJob[],
@@ -284,36 +305,31 @@ function deriveState(
   events: FactoryEvent[],
   reporterStatus: FactoryRunProjection["reporter"]["status"],
 ): { state: FactoryState; repairRound: number | null } {
-  const latest = [...events].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0];
+  const reporterCandidates = events
+    .map((event, index) => ({ event, index, candidate: reporterStateCandidate(event) }))
+    .filter((item): item is {
+      event: FactoryEvent;
+      index: number;
+      candidate: { state: FactoryState; repairRound: number | null };
+    } => item.candidate !== null)
+    .sort((a, b) => {
+      const timeOrder = a.event.occurredAt.localeCompare(b.event.occurredAt);
+      return timeOrder === 0 ? a.index - b.index : timeOrder;
+    });
+  const latestReporter = reporterCandidates.at(-1) ?? null;
 
-  if (latest?.stage === "repair" && latest.outcome === "escalated") {
-    return { state: "escalated", repairRound: parseRepairRound(latest.errorCode) ?? 2 };
-  }
-  if (latest?.stage === "repair" && latest.outcome === "blocked") {
-    return { state: "blocked", repairRound: parseRepairRound(latest.errorCode) };
-  }
-  if (latest?.stage === "repair" && latest.outcome === "returned") {
-    return { state: "repairing", repairRound: parseRepairRound(latest.errorCode) };
+  if (latestReporter?.candidate.state === "verified") {
+    const reporterAt = Date.parse(latestReporter.event.occurredAt);
+    const laterVerifyFailure = jobs.some((job) => {
+      if (!/verify|validation/i.test(job.name)) return false;
+      if (!["failure", "timed_out", "startup_failure"].includes(job.conclusion ?? "")) return false;
+      const completedAt = job.completedAt ? Date.parse(job.completedAt) : NaN;
+      return !Number.isFinite(reporterAt) || !Number.isFinite(completedAt) || completedAt >= reporterAt;
+    });
+    if (laterVerifyFailure) return { state: "validation_gap", repairRound: null };
   }
 
-  const latestOccurredAt = latest ? Date.parse(latest.occurredAt) : NaN;
-  const laterVerifyFailure = jobs.some((job) => {
-    if (!/verify|validation/i.test(job.name)) return false;
-    if (!["failure", "timed_out", "startup_failure"].includes(job.conclusion ?? "")) return false;
-    if (!latest || !Number.isFinite(latestOccurredAt)) return true;
-    const completedAt = job.completedAt ? Date.parse(job.completedAt) : NaN;
-    return !Number.isFinite(completedAt) || completedAt >= latestOccurredAt;
-  });
-
-  if (latest?.kind === "verify.passed") {
-    return laterVerifyFailure
-      ? { state: "validation_gap", repairRound: null }
-      : { state: "verified", repairRound: null };
-  }
-  if (latest?.kind === "delivery.failed") return { state: "delivery_retry", repairRound: null };
-  if (latest?.kind === "delivery.draft_pr_created") return { state: "delivered", repairRound: null };
-  if (latest?.kind === "verify.failed") return { state: "validation_gap", repairRound: null };
-  if (latest?.kind === "candidate.captured") return { state: "candidate_captured", repairRound: null };
+  if (latestReporter) return latestReporter.candidate;
 
   const activeJob = jobs.some((job) => job.status === "in_progress" || job.status === "queued");
   if (activeJob || run.status === "in_progress") {
