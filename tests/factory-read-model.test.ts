@@ -75,6 +75,17 @@ function reporterHandler(source: Record<string, unknown>) {
   );
 }
 
+function reporterEventsHandler(sources: Array<Record<string, unknown>>) {
+  return http.post(
+    "https://api.cloudflare.com/client/v4/accounts/account/workers/observability/telemetry/query",
+    async () =>
+      HttpResponse.json({
+        success: true,
+        result: { events: { count: sources.length, events: sources.map((source) => ({ source })) } },
+      }),
+  );
+}
+
 test("projects trusted Reporter Verify PASS as verified without exposing raw telemetry", async () => {
   network.use(
     ...githubHandlers({}),
@@ -105,6 +116,110 @@ test("projects trusted Reporter Verify PASS as verified without exposing raw tel
   assert.equal(projection.reporter.events[0]?.kind, "verify.passed");
   assert.doesNotMatch(JSON.stringify(projection), /sensitive_secret|must-not-leak/);
   assert.equal(projection.provenance.some((item) => item.id === "evt-1"), true);
+});
+
+test("run.finished does not mask a prior Verify PASS lifecycle state", async () => {
+  network.use(
+    ...githubHandlers({}),
+    reporterEventsHandler([
+      {
+        schema: "haomai.telemetry.v1",
+        app_id: "mira-worker-reporter",
+        trust_class: "trusted_pipeline",
+        repository: "uichat-mira/mira-mobile",
+        issue_number: 84,
+        run_id: "123",
+        run_attempt: 2,
+        occurred_at: "2026-11-18T06:11:00.100Z",
+        kind: "verify.passed",
+        stage: "verify",
+        outcome: "success",
+        level: "info",
+        event_id: "verify-pass",
+      },
+      {
+        schema: "haomai.telemetry.v1",
+        app_id: "mira-worker-reporter",
+        trust_class: "trusted_pipeline",
+        repository: "uichat-mira/mira-mobile",
+        issue_number: 84,
+        run_id: "123",
+        run_attempt: 2,
+        occurred_at: "2026-11-18T06:11:00.200Z",
+        kind: "run.finished",
+        stage: "run",
+        outcome: "success",
+        level: "info",
+        event_id: "run-finished",
+      },
+    ]),
+  );
+
+  const projection = await getFactoryRunProjection(
+    githubEnv,
+    cloudflareEnv,
+    "uichat-mira/mira-mobile",
+    123,
+    Date.parse("2026-11-18T06:12:30Z"),
+  );
+
+  assert.equal(projection.state, "verified");
+});
+
+test("repair return and escalation survive the trailing run.finished event", async () => {
+  for (const [outcome, errorCode, expectedState, expectedRound] of [
+    ["returned", "VALIDATION_REPAIR_ROUND_2", "repairing", 2],
+    ["escalated", "REPAIR_ROUND_LIMIT_EXHAUSTED", "escalated", 2],
+  ] as const) {
+    network.resetHandlers();
+    network.use(
+      ...githubHandlers({}),
+      reporterEventsHandler([
+        {
+          schema: "haomai.telemetry.v1",
+          app_id: "mira-worker-reporter",
+          trust_class: "trusted_pipeline",
+          repository: "uichat-mira/mira-mobile",
+          issue_number: 84,
+          run_id: "123",
+          run_attempt: 2,
+          occurred_at: "2026-11-18T06:11:00.100Z",
+          kind: outcome === "returned" ? "recovery.detected" : "recovery.failed",
+          stage: "repair",
+          outcome,
+          level: "warn",
+          error_code: errorCode,
+          event_id: "repair-event",
+        },
+        {
+          schema: "haomai.telemetry.v1",
+          app_id: "mira-worker-reporter",
+          trust_class: "trusted_pipeline",
+          repository: "uichat-mira/mira-mobile",
+          issue_number: 84,
+          run_id: "123",
+          run_attempt: 2,
+          occurred_at: "2026-11-18T06:11:00.200Z",
+          kind: "run.finished",
+          stage: "run",
+          outcome: "failure",
+          level: "error",
+          event_id: "run-finished",
+        },
+      ]),
+    );
+
+    const projection = await getFactoryRunProjection(
+      githubEnv,
+      cloudflareEnv,
+      "uichat-mira/mira-mobile",
+      123,
+      Date.parse("2026-11-18T06:12:30Z"),
+    );
+
+    assert.equal(projection.state, expectedState);
+    assert.equal(projection.repairRound, expectedRound);
+  }
 });
 
 test("Reporter evidence from a previous run attempt is ignored", async () => {
