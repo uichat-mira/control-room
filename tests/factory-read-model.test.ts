@@ -185,6 +185,24 @@ test("Private repositories are rejected before exposing Actions data", async () 
   );
 });
 
+test("Skipped reusable Worker runs remain an observation gap, not a Worker failure", async () => {
+  network.use(
+    ...githubHandlers({}),
+    http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123", () =>
+      HttpResponse.json({ ...run, conclusion: "skipped" }),
+    ),
+    http.post(
+      "https://api.cloudflare.com/client/v4/accounts/account/workers/observability/telemetry/query",
+      () => new HttpResponse("unavailable", { status: 503 }),
+    ),
+  );
+
+  const projection = await getFactoryRunProjection(githubEnv, cloudflareEnv, "uichat-mira/mira-mobile", 123, Date.parse("2026-11-18T06:12:30Z"));
+
+  assert.equal(projection.state, "observation_gap");
+  assert.equal(projection.run.conclusion, "skipped");
+});
+
 test("Non-Worker GitHub runs are rejected", async () => {
   network.use(
     ...githubHandlers({}),
