@@ -82,6 +82,7 @@ test("projects trusted Reporter Verify PASS as verified without exposing raw tel
       repository: "uichat-mira/mira-mobile",
       issue_number: 84,
       run_id: "123",
+      run_attempt: 2,
       occurred_at: "2026-11-18T06:11:00Z",
       kind: "verify.passed",
       stage: "verify",
@@ -101,6 +102,33 @@ test("projects trusted Reporter Verify PASS as verified without exposing raw tel
   assert.equal(projection.reporter.events[0]?.kind, "verify.passed");
   assert.doesNotMatch(JSON.stringify(projection), /sensitive_secret|must-not-leak/);
   assert.equal(projection.provenance.some((item) => item.id === "evt-1"), true);
+});
+
+test("Reporter evidence from a previous run attempt is ignored", async () => {
+  network.use(
+    ...githubHandlers({}),
+    reporterHandler({
+      schema: "haomai.telemetry.v1",
+      app_id: "mira-worker-reporter",
+      trust_class: "trusted_pipeline",
+      repository: "uichat-mira/mira-mobile",
+      issue_number: 84,
+      run_id: "123",
+      run_attempt: 1,
+      occurred_at: "2026-11-18T06:11:00Z",
+      kind: "verify.passed",
+      stage: "verify",
+      outcome: "passed",
+      level: "info",
+      event_id: "old-attempt",
+      error_code: null,
+    }),
+  );
+
+  const projection = await getFactoryRunProjection(githubEnv, cloudflareEnv, "uichat-mira/mira-mobile", 123, Date.parse("2026-11-18T06:12:30Z"));
+
+  assert.equal(projection.reporter.events.length, 0);
+  assert.equal(projection.state, "observation_gap");
 });
 
 test("Reporter outage becomes observation gap, never Worker failure or Verify PASS", async () => {
