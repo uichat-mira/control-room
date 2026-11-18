@@ -10,6 +10,7 @@ import {
 import {
   BookOpen,
   CircleDot,
+  Clapperboard,
   Gauge,
   Monitor,
   Moon,
@@ -20,13 +21,14 @@ import {
 } from "lucide-react";
 
 type ThemeMode = "system" | "light" | "dark";
-type PageKey = "overview" | "engineering" | "runtime" | "governance";
+type PageKey = "overview" | "engineering" | "runtime" | "governance" | "factory";
 
 const Overview = lazy(() => import("./Overview"));
 const Engineering = lazy(() => import("./Engineering"));
 const Runtime = lazy(() => import("./Runtime"));
 const Governance = lazy(() => import("./Governance"));
 const Wall = lazy(() => import("./Wall"));
+const FactoryTV = lazy(() => import("./FactoryTV"));
 const DocsPage = lazy(() => import("./DocsPage"));
 
 const nextTheme: Record<ThemeMode, ThemeMode> = {
@@ -65,11 +67,18 @@ const routes: Record<PageKey, {
     eyebrow: "WORK / POLICY",
     deck: "Issues, pull requests, branch policy, rulesets, and public organization Projects.",
   },
+  factory: {
+    path: "/factory",
+    title: "Factory TV",
+    eyebrow: "CHANNEL 05 / INDUSTRIAL FEED",
+    deck: "Worker stations, trusted evidence, and a little anti-996 industrial satire.",
+  },
 };
 
 const nav = [
   ["overview", "Overview", Gauge],
   ["engineering", "Engineering", Wrench],
+  ["factory", "Factory TV", Clapperboard],
   ["runtime", "Runtime", Radio],
   ["governance", "Governance", ShieldCheck],
 ] as const;
@@ -79,6 +88,7 @@ function pageKeyForPath(pathname: string): PageKey {
   if (normalized === routes.engineering.path) return "engineering";
   if (normalized === routes.runtime.path) return "runtime";
   if (normalized === routes.governance.path) return "governance";
+  if (normalized === routes.factory.path || normalized.startsWith("/factory/")) return "factory";
   return "overview";
 }
 
@@ -216,6 +226,9 @@ export default function App() {
       <Route element={<ControlLayout />}>
         <Route index element={<Overview />} />
         <Route path="engineering" element={<Engineering />} />
+        <Route path="factory" element={<FactoryTV />} />
+        <Route path="factory/broadcast" element={<FactoryTV />} />
+        <Route path="factory/:runId" element={<FactoryTV />} />
         <Route path="runtime" element={<Runtime />} />
         <Route path="governance" element={<Governance />} />
       </Route>
