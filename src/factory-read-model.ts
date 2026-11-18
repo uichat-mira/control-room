@@ -8,8 +8,7 @@ const REPORTER_SCRIPT = "how-am-i";
 const REPORTER_APP_ID = "mira-worker-reporter";
 const REPORTER_TRUST_CLASS = "trusted_pipeline";
 const REPORTER_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const REPORTER_QUERY_LOOKBACK_MS = 3 * 60 * 1000;
-const REPORTER_QUERY_GRACE_MS = 60 * 1000;
+const REPORTER_QUERY_JOB_PADDING_MS = 5 * 1000;
 
 export type FactoryState =
   | "queued"
@@ -375,6 +374,7 @@ async function reporterEvents(
   env: CloudflareEnv,
   run: GitHubRun,
   repository: string,
+  jobs: GitHubJob[],
   now: number,
 ): Promise<FactoryRunProjection["reporter"]> {
   const freshness = reporterFreshness(run, now);
@@ -386,20 +386,28 @@ async function reporterEvents(
     return { status: "expired", freshness, events: [], observedAt: null };
   }
 
-  // The trusted_reporter job runs once, at the end of the reusable Worker lifecycle.
-  // Do not scan the whole Worker run: active runs have no Reporter evidence yet, and
-  // completed runs only need a narrow tail window around the final GitHub update.
+  // Only a GitHub-proven successful trusted_reporter job may trigger the expensive
+  // Workers Logs query. Historical/legacy/skipped runs must never turn arbitrary
+  // public run IDs into an Observability scan oracle.
+  const reporterJob = jobs.find(
+    (job) => job.name?.split("/").at(-1)?.trim() === "trusted_reporter",
+  );
   if (
     run.status !== "completed" ||
-    ["skipped", "cancelled", "neutral", "action_required"].includes(run.conclusion ?? "")
+    !reporterJob ||
+    reporterJob.status !== "completed" ||
+    ["skipped", "cancelled", "neutral", "action_required"].includes(reporterJob.conclusion ?? "")
   ) {
     return { status: "not_expected", freshness, events: [], observedAt: null };
   }
+  if (reporterJob.conclusion !== "success") {
+    return { status: "unavailable", freshness, events: [], observedAt: null };
+  }
 
-  const createdAt = Date.parse(run.created_at);
-  const updatedAt = Date.parse(run.updated_at);
-  const from = Math.max(createdAt, updatedAt - REPORTER_QUERY_LOOKBACK_MS);
-  const to = Math.min(now, updatedAt + REPORTER_QUERY_GRACE_MS);
+  const startedAt = reporterJob.started_at ? Date.parse(reporterJob.started_at) : NaN;
+  const completedAt = reporterJob.completed_at ? Date.parse(reporterJob.completed_at) : NaN;
+  const from = startedAt - REPORTER_QUERY_JOB_PADDING_MS;
+  const to = Math.min(now, completedAt + REPORTER_QUERY_JOB_PADDING_MS);
   if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) {
     return { status: "unavailable", freshness: "unavailable", events: [], observedAt: null };
   }
@@ -411,7 +419,7 @@ async function reporterEvents(
       view: "events",
       limit: 100,
       parameters: {
-        datasets: ["workers"],
+        datasets: ["cloudflare-workers"],
         filterCombination: "and",
         filters: [
           { key: "$metadata.service", operation: "eq", type: "string", value: REPORTER_SCRIPT },
@@ -494,7 +502,7 @@ export async function getFactoryRunProjection(
   }
 
   const observedAt = new Date(now).toISOString();
-  const [jobsResult, artifactsResult, pullRequestsResult, reporter] = await Promise.all([
+  const [jobsResult, artifactsResult, pullRequestsResult] = await Promise.all([
     github<{ jobs: GitHubJob[] }>(
       githubEnv,
       `/repos/${ORG}/${encodedRepo}/actions/runs/${runId}/jobs?per_page=100&filter=latest`,
@@ -512,8 +520,9 @@ export async function getFactoryRunProjection(
         return pr;
       }),
     ),
-    reporterEvents(cloudflareEnv, run, repository, now),
   ]);
+
+  const reporter = await reporterEvents(cloudflareEnv, run, repository, jobsResult.jobs, now);
 
   const jobs = jobsResult.jobs.map((job) => ({
     id: job.id,
