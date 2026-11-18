@@ -77,7 +77,7 @@ const broadcasts = [
 ];
 
 const stateTone = (state: FactoryState): Tone =>
-  ["working", "validating", "candidate_captured", "repairing", "queued"].includes(state)
+  ["working", "validating", "candidate_captured", "repairing", "queued", "verified", "delivered"].includes(state)
     ? "working"
     : ["worker_failed", "blocked", "escalated", "delivery_retry"].includes(state)
       ? "failed"
@@ -164,6 +164,7 @@ const liveStation = (projection: FactoryRunProjection): Station => {
     projection.reporter.status === "available" ? `Trusted Reporter · ${projection.reporter.events.length} events` :
     projection.reporter.status === "expired" ? "Reporter 日志已过期 · GitHub 仍可追溯" :
     projection.reporter.status === "not_configured" ? "Reporter 未配置 · 仅显示 GitHub 事实" :
+    projection.reporter.status === "not_expected" ? "Reporter 当前不应产生事件 · 仅显示 GitHub 事实" :
     "Reporter unavailable · 不视为 Worker failure";
 
   return {
@@ -338,7 +339,7 @@ export default function FactoryTV() {
       </div>
 
       <nav className="factory-tabs" aria-label="工厂 TV 视图">
-        <NavLink to={realRequested ? `/factory?mode=real&repository=${encodeURIComponent(realRepository ?? "")}&runId=${encodeURIComponent(realRunId ?? "")}` : "/factory"} end><Activity size={15} /> 工厂直播墙</NavLink>
+        <NavLink to="/factory" end><Activity size={15} /> 工厂直播墙</NavLink>
         <NavLink to={realRequested ? `/factory?mode=real&repository=${encodeURIComponent(realRepository ?? "")}&runId=${encodeURIComponent(realRunId ?? "")}` : `/factory/${selected.id}`} className={() => isRoom || realRequested ? "active" : ""}><Radio size={15} /> 单工位直播间</NavLink>
         <NavLink to="/factory/broadcast"><CircleAlert size={15} /> 血泪播报栏</NavLink>
       </nav>
