@@ -8,6 +8,7 @@ import {
 } from "./github";
 import { openApiDocument } from "./openapi";
 import { getServiceSnapshot } from "./services";
+import { getFactoryRunProjection, type FactoryRunProjection } from "./factory-read-model";
 import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
 
 const AUTH_GITHUB_TTL_SECONDS = 15 * 60;
@@ -81,6 +82,55 @@ function governanceCacheKeys(request: Request, env: Env) {
     fresh: new Request(`${prefix}-fresh`, { method: "GET" }),
     stale: new Request(`${prefix}-stale`, { method: "GET" }),
   };
+}
+
+function factoryCacheKey(request: Request, repository: string, runId: number) {
+  const url = new URL(request.url);
+  const key = new URL("/api/__factory-v1", url.origin);
+  key.searchParams.set("repository", repository);
+  key.searchParams.set("runId", String(runId));
+  return new Request(key, { method: "GET" });
+}
+
+function factoryCacheTtl(snapshot: FactoryRunProjection) {
+  if (snapshot.run.status !== "completed") return 15;
+  if (snapshot.reporter.status === "available" && snapshot.reporter.events.length > 0) return 6 * 60 * 60;
+  if (snapshot.reporter.status === "not_expected" || snapshot.run.conclusion === "skipped") return 10 * 60;
+  if (snapshot.reporter.status === "unavailable") return 5 * 60;
+  if (snapshot.reporter.status === "expired") return 60 * 60;
+  return 10 * 60;
+}
+
+async function cachedFactoryRun(
+  request: Request,
+  env: Env,
+  repository: string,
+  runId: number,
+): Promise<FactoryRunProjection> {
+  let edgeCache: Cache | null = null;
+  let key: Request | null = null;
+
+  try {
+    const workerCaches = caches as CacheStorage & { default: Cache };
+    edgeCache = workerCaches.default;
+    key = factoryCacheKey(request, repository, runId);
+    const cached = await edgeCache.match(key);
+    if (cached) return (await cached.json()) as FactoryRunProjection;
+  } catch {
+    // Cache is an optimization. Upstream lifecycle reads still execute exactly once.
+  }
+
+  const next = await getFactoryRunProjection(env, env, repository, runId);
+
+  if (edgeCache && key) {
+    try {
+      await edgeCache.put(key, cacheResponse(next, factoryCacheTtl(next)));
+    } catch {
+      // Cache write failure must not change the lifecycle projection.
+    }
+  }
+
+  return next;
 }
 
 function cloudflareCacheKey(request: Request, env: Env) {
@@ -302,6 +352,7 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
         "/api/v1/analytics",
         "/api/v1/governance",
         "/api/v1/projects",
+        "/api/v1/factory/run?repository=uichat-mira/mira-mobile&runId=...",
       ],
     });
   }
@@ -366,6 +417,43 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
       generatedAt: new Date().toISOString(),
       ...cloudflare.analytics24h,
     }));
+  }
+
+  if (pathname === "/api/v1/factory/run") {
+    const url = new URL(request.url);
+    const repository = url.searchParams.get("repository");
+    const rawRunId = url.searchParams.get("runId");
+    const runId = rawRunId ? Number(rawRunId) : NaN;
+
+    if (!repository || !Number.isSafeInteger(runId) || runId <= 0) {
+      return publicApiJson(v1Envelope({
+        status: "invalid_request",
+        error: "repository_and_positive_runId_required",
+      }), { status: 400 });
+    }
+
+    try {
+      const projection = await cachedFactoryRun(request, env, repository, runId);
+      return publicApiJson(v1Envelope(projection), {
+        headers: {
+          "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
+          "x-mira-factory-source": "github+trusted-reporter",
+        },
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "factory_run_unavailable";
+      const status = [
+        "unsupported_repository",
+        "repository_not_public",
+        "invalid_run_id",
+        "not_external_worker_run",
+        "GitHub API 404",
+      ].includes(reason) ? 404 : 503;
+      return publicApiJson(v1Envelope({
+        status: "unavailable",
+        error: reason,
+      }), { status });
+    }
   }
 
   if (pathname === "/api/v1/governance" || pathname === "/api/v1/projects") {
