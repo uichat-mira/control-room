@@ -40,10 +40,13 @@ Control Room exposes a versioned, read-only, public-safe API. It only projects p
 - `GET /api/v1/analytics` — Workers last-24h requests and errors
 - `GET /api/v1/governance` — Issues / PR / branch protection / rulesets / Projects
 - `GET /api/v1/projects` — public GitHub Projects
+- `GET /api/v1/factory/run?repository=...&runId=...` — sanitized real External Worker lifecycle projection
 - `GET /openapi.json` — OpenAPI 3.1 contract
 - `GET /docs` — human-readable API/MCP documentation
 
 The v1 API allows cross-origin `GET` requests with `Access-Control-Allow-Origin: *`. Responses are cache-friendly and carry `x-mira-api-version: v1`.
+
+Factory lifecycle reads remain public-safe: only public `uichat-mira/*` repositories and genuine Mira External Worker runs are accepted. GitHub is the lifecycle/evidence source; 号脉 is an optional short-lived observation source. The server narrows Reporter queries to the lifecycle tail, skips runs that cannot produce Reporter evidence, and edge-caches repeated projections so a page refresh does not become an unbounded Workers Logs scan.
 
 Legacy `GET /api/health`, `/api/summary`, `/api/organization`, and `/api/governance` remain temporarily available and return deprecation/successor headers. New clients should use `/api/v1/*`.
 
@@ -91,12 +94,12 @@ Static `/openapi.json` is served as an asset and does not consume the Worker API
 
 ## Cloudflare read model
 
-CI/CD reuses the organization-wide Cloudflare credentials:
+CI/CD currently reuses the organization-wide Cloudflare credentials:
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-The deploy workflow also installs the same shared token into the Worker runtime under the internal binding name `CLOUDFLARE_READ_TOKEN`. Control Room only performs read requests with that runtime binding; no Cloudflare mutation endpoints are implemented in the application.
+The deploy workflow also installs the same shared token into the Worker runtime under the legacy internal binding name `CLOUDFLARE_READ_TOKEN`. The application uses it only for bounded reads and the Workers Observability query endpoint; Cloudflare classifies that query permission under Workers Observability Write/Edit even though Control Room does not expose a Cloudflare mutation API. The credential stays server-side and is never serialized into the public projection.
 
 The effective data scope still depends on the permissions granted to the shared token. If a Cloudflare API family is not permitted, Control Room keeps the available data and reports that source as partial/degraded instead of failing the whole API.
 
@@ -113,9 +116,15 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 - `/runtime` — live service probes, Workers, Pages, and 24-hour traffic/error analytics
 - `/governance` — Issues, pull requests, default-branch protection, rulesets, and public Projects
 - `/wall` — large-screen operations view; forced dark theme and 60-second refresh
+- `/factory` — Factory TV design/demo wall; synthetic workstations stay explicitly labelled
+- `/factory?mode=real&repository=uichat-mira/<repo>&runId=<run>` — real, sanitized External Worker lifecycle projection
+- `/factory/demo-01` (and `demo-02`, `demo-03`) — single-station timeline demo using explicitly synthetic events
+- `/factory/broadcast` — fact-based industrial satire / broadcast copy demo
 - `/docs` — public API and MCP documentation
 
 The UI is intentionally split by operational question rather than by raw data table. Engineering, Runtime, and Governance use focused `/api/v1/*` reads; only Overview and Wall use the cross-domain summary.
+
+**Factory TV scope:** Factory TV is an independent presentation mode beside Wall, not a fifth business domain. Demo stations remain synthetic and clearly labelled. Real mode consumes the public-safe server projection only; it does not expose raw Worker logs, Cloudflare credentials, prompts, model output, or an invented heartbeat. GitHub remains authoritative for lifecycle evidence and 号脉 only refines trusted terminal stage events when available.
 
 ## Local development
 
@@ -131,12 +140,15 @@ For authenticated GitHub reads, set `GITHUB_READ_TOKEN` locally. Never commit ei
 ## Verify
 
 ```bash
-npm run typecheck
-npm run build
+npm run check
 npm run test:github-overview
 ```
 
+`npm run check` covers type checking, targeted Factory TV lifecycle tests, and the production build.
+
 ## Deploy
+
+Control Room keeps `dev` and `test` as source/CI promotion gates but does not maintain dedicated shared Cloudflare runtimes for them. Only `prod` deploys the production Worker; see [`docs/environment.md`](docs/environment.md) for the repository-level environment exception.
 
 Production deployment is owned by `.github/workflows/deploy.yml` on the `prod` branch.
 

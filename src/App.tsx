@@ -10,6 +10,7 @@ import {
 import {
   BookOpen,
   CircleDot,
+  Clapperboard,
   Gauge,
   Monitor,
   Moon,
@@ -27,6 +28,7 @@ const Engineering = lazy(() => import("./Engineering"));
 const Runtime = lazy(() => import("./Runtime"));
 const Governance = lazy(() => import("./Governance"));
 const Wall = lazy(() => import("./Wall"));
+const FactoryTV = lazy(() => import("./FactoryTV"));
 const DocsPage = lazy(() => import("./DocsPage"));
 
 const nextTheme: Record<ThemeMode, ThemeMode> = {
@@ -167,6 +169,7 @@ function ControlLayout() {
         <div className="control-nav-meta">
           <NavLink to="/docs"><BookOpen size={14} /> Docs</NavLink>
           <NavLink to="/wall"><Monitor size={14} /> Wall</NavLink>
+          <NavLink to="/factory"><Clapperboard size={14} /> Factory TV</NavLink>
         </div>
       </nav>
 
@@ -198,6 +201,24 @@ function WallRoute() {
   );
 }
 
+function FactoryRoute() {
+  useEffect(() => {
+    document.documentElement.dataset.wall = "true";
+    document.title = "Factory TV · Mira Control Room";
+    return () => {
+      delete document.documentElement.dataset.wall;
+    };
+  }, []);
+
+  return (
+    <Suspense fallback={<main className="shell wall-shell"><LoadingPage /></main>}>
+      <main className="shell wall-shell factory-screen">
+        <FactoryTV />
+      </main>
+    </Suspense>
+  );
+}
+
 function DocsRoute() {
   useEffect(() => {
     delete document.documentElement.dataset.wall;
@@ -221,6 +242,9 @@ export default function App() {
       </Route>
       <Route path="docs" element={<DocsRoute />} />
       <Route path="wall" element={<WallRoute />} />
+      <Route path="factory" element={<FactoryRoute />} />
+      <Route path="factory/broadcast" element={<FactoryRoute />} />
+      <Route path="factory/:runId" element={<FactoryRoute />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

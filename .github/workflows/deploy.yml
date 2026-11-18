@@ -3,9 +3,13 @@ name: Control Room CI / Deploy
 on:
   push:
     branches:
+      - dev
+      - test
       - prod
   pull_request:
     branches:
+      - dev
+      - test
       - prod
   workflow_dispatch:
 
@@ -33,11 +37,8 @@ jobs:
       - name: Install
         run: npm install --no-audit --no-fund
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
+      - name: Repository check
+        run: npm run check
 
   deploy:
     name: Deploy
