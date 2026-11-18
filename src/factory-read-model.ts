@@ -43,6 +43,7 @@ export interface FactoryEvent {
   outcome: string;
   level: string;
   errorCode: string | null;
+  issueNumber: number | null;
   evidence: FactoryEvidence | null;
 }
 
@@ -278,36 +279,22 @@ function deriveState(
   artifacts: FactoryArtifact[],
   events: FactoryEvent[],
 ): { state: FactoryState; repairRound: number | null } {
-  const latest = [...events].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  const latest = [...events].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0];
 
-  const escalated = latest.find((event) => event.stage === "repair" && event.outcome === "escalated");
-  if (escalated) return { state: "escalated", repairRound: parseRepairRound(escalated.errorCode) ?? 2 };
-
-  const blocked = latest.find((event) => event.stage === "repair" && event.outcome === "blocked");
-  if (blocked) return { state: "blocked", repairRound: parseRepairRound(blocked.errorCode) };
-
-  const repairing = latest.find((event) => event.stage === "repair" && event.outcome === "returned");
-  if (repairing) return { state: "repairing", repairRound: parseRepairRound(repairing.errorCode) };
-
-  if (latest.some((event) => event.kind === "verify.passed")) {
-    return { state: "verified", repairRound: null };
+  if (latest?.stage === "repair" && latest.outcome === "escalated") {
+    return { state: "escalated", repairRound: parseRepairRound(latest.errorCode) ?? 2 };
   }
-
-  if (latest.some((event) => event.kind === "delivery.failed")) {
-    return { state: "delivery_retry", repairRound: null };
+  if (latest?.stage === "repair" && latest.outcome === "blocked") {
+    return { state: "blocked", repairRound: parseRepairRound(latest.errorCode) };
   }
-
-  if (latest.some((event) => event.kind === "delivery.draft_pr_created")) {
-    return { state: "delivered", repairRound: null };
+  if (latest?.stage === "repair" && latest.outcome === "returned") {
+    return { state: "repairing", repairRound: parseRepairRound(latest.errorCode) };
   }
-
-  if (latest.some((event) => event.kind === "verify.failed")) {
-    return { state: "validation_gap", repairRound: null };
-  }
-
-  if (latest.some((event) => event.kind === "candidate.captured")) {
-    return { state: "candidate_captured", repairRound: null };
-  }
+  if (latest?.kind === "verify.passed") return { state: "verified", repairRound: null };
+  if (latest?.kind === "delivery.failed") return { state: "delivery_retry", repairRound: null };
+  if (latest?.kind === "delivery.draft_pr_created") return { state: "delivered", repairRound: null };
+  if (latest?.kind === "verify.failed") return { state: "validation_gap", repairRound: null };
+  if (latest?.kind === "candidate.captured") return { state: "candidate_captured", repairRound: null };
 
   const activeJob = jobs.some((job) => job.status === "in_progress" || job.status === "queued");
   if (activeJob || run.status === "in_progress") {
@@ -319,12 +306,19 @@ function deriveState(
 
   if (run.status === "queued") return { state: "queued", repairRound: null };
 
-  if (run.status === "completed" && run.conclusion && run.conclusion !== "success") {
-    return { state: "worker_failed", repairRound: null };
+  const artifactExpected = jobs.some((job) =>
+    /candidate|verify|delivery|evidence|handoff/i.test(job.name),
+  );
+  if (
+    run.status === "completed" &&
+    artifactExpected &&
+    (artifacts.length === 0 || artifacts.some((artifact) => artifact.expired))
+  ) {
+    return { state: "artifact_unavailable", repairRound: null };
   }
 
-  if (artifacts.some((artifact) => artifact.expired && /candidate|verify|delivery/i.test(artifact.name))) {
-    return { state: "artifact_unavailable", repairRound: null };
+  if (run.status === "completed" && run.conclusion && run.conclusion !== "success") {
+    return { state: "worker_failed", repairRound: null };
   }
 
   if (run.status === "completed" && run.conclusion === "success") {
@@ -332,6 +326,14 @@ function deriveState(
   }
 
   return { state: "unknown", repairRound: null };
+}
+
+function githubFreshness(run: GitHubRun, now: number): FactoryFreshness {
+  const updated = Date.parse(run.updated_at);
+  if (!Number.isFinite(updated)) return "unavailable";
+  if (now - updated > REPORTER_RETENTION_MS) return "expired";
+  if (now - updated > 10 * 60 * 1000) return "stale";
+  return "fresh";
 }
 
 function reporterFreshness(run: GitHubRun, now: number): FactoryFreshness {
@@ -393,6 +395,7 @@ async function reporterEvents(
         outcome: source.outcome ?? "unknown",
         level: source.level ?? "info",
         errorCode: source.error_code ?? null,
+        issueNumber: source.issue_number ?? null,
         evidence: source.evidence_ref?.id
           ? evidence(
               "haomai-event",
@@ -497,21 +500,15 @@ export async function getFactoryRunProjection(
       evidence: evidence("github-pr", String(pr.number), pr.html_url, observedAt),
     }));
 
-  const eventIssueNumbers = reporter.events
-    .map((event) => event.evidence?.id)
-    .filter(() => false);
-  void eventIssueNumbers;
-
-  const issueNumber = null;
+  const issueNumber = reporter.events.find((event) => event.issueNumber != null)?.issueNumber ?? null;
   const derived = deriveState(run, jobs, artifacts, reporter.events);
-  const reporterIssueNumber = null;
 
   return {
     apiVersion: "v1",
     mode: "real",
     generatedAt: observedAt,
     repository,
-    issueNumber: reporterIssueNumber ?? issueNumber,
+    issueNumber,
     run: {
       id: run.id,
       attempt: run.run_attempt,
@@ -531,7 +528,7 @@ export async function getFactoryRunProjection(
     },
     state: derived.state,
     repairRound: derived.repairRound,
-    freshness: reporter.freshness,
+    freshness: githubFreshness(run, now),
     provenance: [
       evidence("github-run", String(run.id), run.html_url, observedAt),
       ...jobs.map((job) => job.evidence),
