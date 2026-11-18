@@ -105,19 +105,30 @@ async function cachedFactoryRun(
   repository: string,
   runId: number,
 ): Promise<FactoryRunProjection> {
+  let edgeCache: Cache | null = null;
+  let key: Request | null = null;
+
   try {
     const workerCaches = caches as CacheStorage & { default: Cache };
-    const edgeCache = workerCaches.default;
-    const key = factoryCacheKey(request, repository, runId);
+    edgeCache = workerCaches.default;
+    key = factoryCacheKey(request, repository, runId);
     const cached = await edgeCache.match(key);
     if (cached) return (await cached.json()) as FactoryRunProjection;
-
-    const next = await getFactoryRunProjection(env, env, repository, runId);
-    await edgeCache.put(key, cacheResponse(next, factoryCacheTtl(next)));
-    return next;
   } catch {
-    return getFactoryRunProjection(env, env, repository, runId);
+    // Cache is an optimization. Upstream lifecycle reads still execute exactly once.
   }
+
+  const next = await getFactoryRunProjection(env, env, repository, runId);
+
+  if (edgeCache && key) {
+    try {
+      await edgeCache.put(key, cacheResponse(next, factoryCacheTtl(next)));
+    } catch {
+      // Cache write failure must not change the lifecycle projection.
+    }
+  }
+
+  return next;
 }
 
 function cloudflareCacheKey(request: Request, env: Env) {
@@ -434,6 +445,7 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
         "repository_not_public",
         "invalid_run_id",
         "not_external_worker_run",
+        "GitHub API 404",
       ].includes(reason) ? 404 : 503;
       return publicApiJson(v1Envelope({
         status: "unavailable",
