@@ -140,6 +140,8 @@
   color: var(--ft-text);
 }
 .factory-stats strong.factory-value-ok { color: var(--ft-green); }
+.factory-stats strong.factory-value-failed { color: var(--ft-red); }
+.factory-stats strong.factory-value-observing { color: var(--ft-amber); }
 .factory-stats strong.factory-value-warn { color: var(--ft-amber); }
 .factory-stats small { color: var(--ft-muted); font-size: 11px; }
 .factory-tabs {
@@ -442,3 +444,17 @@
 @media (prefers-reduced-motion: reduce) {
   .factory-station { transition: none; }
 }
+
+.factory-live-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--ft-edge);
+  background: var(--ft-panel);
+  color: var(--ft-muted);
+  font: 560 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.factory-live-evidence a { color: var(--ft-text); }
+.factory-live-evidence a:hover { color: var(--ft-amber); }
