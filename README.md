@@ -113,14 +113,15 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 - `/runtime` — live service probes, Workers, Pages, and 24-hour traffic/error analytics
 - `/governance` — Issues, pull requests, default-branch protection, rulesets, and public Projects
 - `/wall` — large-screen operations view; forced dark theme and 60-second refresh
-- `/factory` — Factory TV front-end design demo: industrial CCTV-style station wall, with selectable synthetic workstations
+- `/factory` — an independent immersive Factory TV display mode, **peer to `/wall`**, not an ordinary business-tab page
+- `/factory` — Factory TV front-end design demo: industrial CCTV-style station wall, with selectable synthetic workstations; opened in an immersive display shell beside `/wall`
 - `/factory/demo-01` (and `demo-02`, `demo-03`) — single-station timeline demo using explicitly synthetic events
 - `/factory/broadcast` — fact-based industrial satire / broadcast copy demo (not live telemetry)
 - `/docs` — public API and MCP documentation
 
 The UI is intentionally split by operational question rather than by raw data table. Engineering, Runtime, and Governance use focused `/api/v1/*` reads; only Overview and Wall use the cross-domain summary.
 
-**Factory TV scope:** the first increment is strictly UI-only. It does not expose or query Cloudflare Observability, add a live Workers feed, duplicate the Reporter log store, or claim an active model heartbeat. All sample names, timestamps and counts are labelled design demonstration data. A separate public-safe API contract and real Runner/Reporter acceptance are required before live status.
+**Factory TV scope:** the first increment is strictly UI-only. The view has independent routes and appears beside Wall in the presentation-mode navigation, not among Overview / Engineering / Runtime / Governance business domains. It does not expose or query Cloudflare Observability, add a live Workers feed, duplicate the Reporter log store, or claim an active model heartbeat. All sample names, timestamps and counts are labelled design demonstration data. A separate public-safe API contract and real Runner/Reporter acceptance are required before live status.
 
 ## Local development
 
