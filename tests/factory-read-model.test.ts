@@ -50,7 +50,10 @@ function githubHandlers(options: {
       HttpResponse.json(run),
     ),
     http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123/jobs", () =>
-      HttpResponse.json({ jobs: options.jobs ?? [{ id: 1, name: "worker_capture", status: "completed", conclusion: "success", started_at: "2026-11-18T06:00:05Z", completed_at: "2026-11-18T06:05:00Z" }] }),
+      HttpResponse.json({ jobs: options.jobs ?? [
+        { id: 1, name: "worker_capture", status: "completed", conclusion: "success", started_at: "2026-11-18T06:00:05Z", completed_at: "2026-11-18T06:05:00Z" },
+        { id: 2, name: "worker / trusted_reporter", status: "completed", conclusion: "success", started_at: "2026-11-18T06:11:00Z", completed_at: "2026-11-18T06:12:00Z" },
+      ] }),
     ),
     http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123/artifacts", () =>
       HttpResponse.json({ artifacts: options.artifacts ?? [{ id: 11, name: "candidate", expired: false, created_at: "2026-11-18T06:05:00Z", expires_at: "2026-12-18T06:05:00Z", updated_at: "2026-11-18T06:05:00Z", url: "https://api.github.com/artifacts/11", archive_download_url: "https://api.github.com/artifacts/11/zip" }] }),
@@ -153,9 +156,9 @@ test("Reporter query is bounded to the lifecycle tail instead of the whole run",
     Date.parse("2026-11-18T06:12:30Z"),
   );
 
-  assert.equal(observedBody.timeframe.from, Date.parse("2026-11-18T06:09:00Z"));
-  assert.equal(observedBody.timeframe.to, Date.parse("2026-11-18T06:12:30Z"));
-  assert.deepEqual(observedBody.parameters.datasets, ["workers"]);
+  assert.equal(observedBody.timeframe.from, Date.parse("2026-11-18T06:10:55Z"));
+  assert.equal(observedBody.timeframe.to, Date.parse("2026-11-18T06:12:05Z"));
+  assert.deepEqual(observedBody.parameters.datasets, ["cloudflare-workers"]);
 });
 
 test("Skipped Worker runs do not trigger an Observability scan", async () => {
@@ -163,6 +166,9 @@ test("Skipped Worker runs do not trigger an Observability scan", async () => {
     ...githubHandlers({}),
     http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123", () =>
       HttpResponse.json({ ...run, conclusion: "skipped" }),
+    ),
+    http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123/jobs", () =>
+      HttpResponse.json({ jobs: [{ id: 1, name: "enrollment", status: "completed", conclusion: "skipped", started_at: null, completed_at: null }] }),
     ),
   );
 
@@ -190,6 +196,14 @@ test("Reporter Verify PASS cannot override a later GitHub Verify failure", async
           conclusion: "failure",
           started_at: "2026-11-18T06:10:30Z",
           completed_at: "2026-11-18T06:11:30Z",
+        },
+        {
+          id: 2,
+          name: "worker / trusted_reporter",
+          status: "completed",
+          conclusion: "success",
+          started_at: "2026-11-18T06:11:00Z",
+          completed_at: "2026-11-18T06:12:00Z",
         },
       ],
     }),
@@ -348,9 +362,8 @@ test("Skipped reusable Worker runs remain an observation gap, not a Worker failu
     http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123", () =>
       HttpResponse.json({ ...run, conclusion: "skipped" }),
     ),
-    http.post(
-      "https://api.cloudflare.com/client/v4/accounts/account/workers/observability/telemetry/query",
-      () => new HttpResponse("unavailable", { status: 503 }),
+    http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123/jobs", () =>
+      HttpResponse.json({ jobs: [{ id: 1, name: "enrollment", status: "completed", conclusion: "skipped", started_at: null, completed_at: null }] }),
     ),
   );
 
