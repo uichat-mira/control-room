@@ -434,6 +434,14 @@ export async function getFactoryRunProjection(
 
   const repoName = repository.slice("uichat-mira/".length);
   const encodedRepo = encodeURIComponent(repoName);
+  const repositoryInfo = await optionalGithub<{ visibility?: string; archived?: boolean }>(
+    githubEnv,
+    `/repos/${ORG}/${encodedRepo}`,
+  );
+  if (repositoryInfo?.visibility !== "public") {
+    throw new Error("repository_not_public");
+  }
+
   const run = await github<GitHubRun>(
     githubEnv,
     `/repos/${ORG}/${encodedRepo}/actions/runs/${runId}?exclude_pull_requests=false`,
