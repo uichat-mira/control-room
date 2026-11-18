@@ -264,7 +264,9 @@ export default function FactoryTV() {
   const isBroadcast = pathname.replace(/\/+$/, "") === "/factory/broadcast";
   const realRepository = searchParams.get("repository");
   const realRunId = searchParams.get("runId");
-  const realRequested = searchParams.get("mode") === "real" || Boolean(realRepository && realRunId);
+  const realModeRequested = searchParams.get("mode") === "real";
+  const realRequested = realModeRequested || Boolean(realRepository && realRunId);
+  const realConfigValid = Boolean(realRepository && realRunId);
   const isRoom = Boolean(runId) && !isBroadcast && !realRequested;
   const [selectedId, setSelectedId] = useState(stations[0].id);
   const [realProjection, setRealProjection] = useState<FactoryRunProjection | null>(null);
@@ -346,7 +348,9 @@ export default function FactoryTV() {
       ) : realRequested ? (
         <div className="factory-content">
           <div className="factory-section-title"><strong>真实 Run / 受控投影</strong><small>GITHUB FACTS + TRUSTED REPORTER</small></div>
-          {realError ? (
+          {!realConfigValid ? (
+            <div className="factory-missing"><CircleAlert size={19} /><strong>真实模式缺少 Run 定位</strong><p>需要同时提供 repository 与 runId；不会回退成演示数据。</p><Link to="/factory">返回演示直播墙 <ArrowRight size={14} /></Link></div>
+          ) : realError ? (
             <div className="factory-missing"><CircleAlert size={19} /><strong>真实 Run 暂时不可读</strong><p>{realError}</p><p>不会退回显示为真实数据。</p><Link to="/factory">返回演示直播墙 <ArrowRight size={14} /></Link></div>
           ) : !live ? (
             <div className="factory-missing"><Activity size={19} /><strong>正在读取真实 Run</strong><p>服务器只返回脱敏后的生命周期投影，不向浏览器提供 GitHub / Cloudflare 凭据。</p></div>
