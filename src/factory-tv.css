@@ -442,3 +442,17 @@
 @media (prefers-reduced-motion: reduce) {
   .factory-station { transition: none; }
 }
+
+.factory-live-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--ft-edge);
+  background: var(--ft-panel);
+  color: var(--ft-muted);
+  font: 560 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.factory-live-evidence a { color: var(--ft-text); }
+.factory-live-evidence a:hover { color: var(--ft-amber); }
