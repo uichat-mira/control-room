@@ -1,3 +1,34 @@
+/* Full-screen display mode, on the same route tier as /wall. */
+.wall-shell.factory-screen {
+  width: min(1680px, calc(100% - 40px));
+  padding-top: 20px;
+}
+.factory-screen .factory-tv { margin-top: 0; }
+.factory-masthead-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 15px;
+}
+.factory-display-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.factory-display-switch a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--ft-edge);
+  min-height: 32px;
+  padding: 5px 10px;
+  color: var(--ft-text);
+  font: 630 11px/1.35 ui-sans-serif, system-ui, sans-serif;
+  text-decoration: none;
+}
+.factory-display-switch a:hover { border-color: var(--ft-amber); background: var(--ft-elevated); }
+
 /* Factory TV is an intentionally contained industrial channel inside Control Room.
    It never modifies the existing app-wide theme or the operational /wall view. */
 .factory-tv {
@@ -375,7 +406,12 @@
   .factory-detail-side { min-height: 260px; }
 }
 @media (max-width: 650px) {
-  .factory-tv { margin-top: 16px; }
+  .wall-shell.factory-screen { width: calc(100% - 16px); padding-top: 8px; }
+  .factory-masthead-top { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .factory-masthead-actions { width: 100%; justify-content: space-between; align-items: flex-start; }
+  .factory-display-switch { flex-wrap: wrap; }
+  .factory-display-switch a { min-height: 36px; }
+  .factory-tv { margin-top: 0; }
   .factory-masthead { padding: 18px 16px; }
   .factory-masthead-main { align-items: flex-start; flex-direction: column; gap: 11px; }
   .factory-masthead-main p { text-align: left; font-size: 11px; }
