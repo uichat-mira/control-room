@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 
 type ThemeMode = "system" | "light" | "dark";
-type PageKey = "overview" | "engineering" | "runtime" | "governance" | "factory";
+type PageKey = "overview" | "engineering" | "runtime" | "governance";
 
 const Overview = lazy(() => import("./Overview"));
 const Engineering = lazy(() => import("./Engineering"));
@@ -67,18 +67,11 @@ const routes: Record<PageKey, {
     eyebrow: "WORK / POLICY",
     deck: "Issues, pull requests, branch policy, rulesets, and public organization Projects.",
   },
-  factory: {
-    path: "/factory",
-    title: "Factory TV",
-    eyebrow: "CHANNEL 05 / INDUSTRIAL FEED",
-    deck: "Worker stations, trusted evidence, and a little anti-996 industrial satire.",
-  },
 };
 
 const nav = [
   ["overview", "Overview", Gauge],
   ["engineering", "Engineering", Wrench],
-  ["factory", "Factory TV", Clapperboard],
   ["runtime", "Runtime", Radio],
   ["governance", "Governance", ShieldCheck],
 ] as const;
@@ -88,7 +81,6 @@ function pageKeyForPath(pathname: string): PageKey {
   if (normalized === routes.engineering.path) return "engineering";
   if (normalized === routes.runtime.path) return "runtime";
   if (normalized === routes.governance.path) return "governance";
-  if (normalized === routes.factory.path || normalized.startsWith("/factory/")) return "factory";
   return "overview";
 }
 
@@ -177,6 +169,7 @@ function ControlLayout() {
         <div className="control-nav-meta">
           <NavLink to="/docs"><BookOpen size={14} /> Docs</NavLink>
           <NavLink to="/wall"><Monitor size={14} /> Wall</NavLink>
+          <NavLink to="/factory"><Clapperboard size={14} /> Factory TV</NavLink>
         </div>
       </nav>
 
@@ -208,6 +201,24 @@ function WallRoute() {
   );
 }
 
+function FactoryRoute() {
+  useEffect(() => {
+    document.documentElement.dataset.wall = "true";
+    document.title = "Factory TV · Mira Control Room";
+    return () => {
+      delete document.documentElement.dataset.wall;
+    };
+  }, []);
+
+  return (
+    <Suspense fallback={<main className="shell wall-shell"><LoadingPage /></main>}>
+      <main className="shell wall-shell factory-screen">
+        <FactoryTV />
+      </main>
+    </Suspense>
+  );
+}
+
 function DocsRoute() {
   useEffect(() => {
     delete document.documentElement.dataset.wall;
@@ -226,14 +237,14 @@ export default function App() {
       <Route element={<ControlLayout />}>
         <Route index element={<Overview />} />
         <Route path="engineering" element={<Engineering />} />
-        <Route path="factory" element={<FactoryTV />} />
-        <Route path="factory/broadcast" element={<FactoryTV />} />
-        <Route path="factory/:runId" element={<FactoryTV />} />
         <Route path="runtime" element={<Runtime />} />
         <Route path="governance" element={<Governance />} />
       </Route>
       <Route path="docs" element={<DocsRoute />} />
       <Route path="wall" element={<WallRoute />} />
+      <Route path="factory" element={<FactoryRoute />} />
+      <Route path="factory/broadcast" element={<FactoryRoute />} />
+      <Route path="factory/:runId" element={<FactoryRoute />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
