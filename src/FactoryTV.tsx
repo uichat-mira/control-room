@@ -321,8 +321,8 @@ export default function FactoryTV() {
         {realRequested ? (
           <>
             <div><span>当前 Run / REAL</span><strong>{realProjection ? "01" : "—"}</strong><small>{realProjection ? `#${realProjection.run.id}` : "等待读取"}</small></div>
-            <div><span>当前状态 / REAL</span><strong className="factory-value-ok">{realProjection ? realProjection.state.replaceAll("_", " ") : "—"}</strong><small>不把 Run 成功冒充 Verify PASS</small></div>
-            <div><span>Reporter / REAL</span><strong className="factory-value-warn">{realProjection?.reporter.status ?? "—"}</strong><small>观察层，不是真相源</small></div>
+            <div><span>当前状态 / REAL</span><strong className={realProjection ? `factory-value-${stateTone(realProjection.state)}` : ""}>{realProjection ? realProjection.state.replaceAll("_", " ") : "—"}</strong><small>不把 Run 成功冒充 Verify PASS</small></div>
+            <div><span>Reporter / REAL</span><strong className={realProjection?.reporter.status === "unavailable" || realProjection?.reporter.status === "expired" ? "factory-value-warn" : "factory-value-ok"}>{realProjection?.reporter.status ?? "—"}</strong><small>观察层，不是真相源</small></div>
             <div><span>Repair / REAL</span><strong>{realProjection?.repairRound ?? "—"}</strong><small>仅来自结构化可信事件</small></div>
           </>
         ) : (
