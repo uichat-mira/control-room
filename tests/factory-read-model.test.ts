@@ -41,13 +41,14 @@ function githubHandlers(options: {
   visibility?: string;
   artifacts?: unknown[];
   jobs?: unknown[];
+  run?: Partial<typeof run>;
 }) {
   return [
     http.get("https://api.github.com/repos/uichat-mira/mira-mobile", () =>
       HttpResponse.json({ visibility: options.visibility ?? "public" }),
     ),
     http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123", () =>
-      HttpResponse.json(run),
+      HttpResponse.json({ ...run, ...(options.run ?? {}) }),
     ),
     http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123/jobs", () =>
       HttpResponse.json({ jobs: options.jobs ?? [
@@ -278,13 +279,10 @@ test("Reporter query is bounded to the lifecycle tail instead of the whole run",
 
 test("Skipped Worker runs do not trigger an Observability scan", async () => {
   network.use(
-    ...githubHandlers({}),
-    http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123", () =>
-      HttpResponse.json({ ...run, conclusion: "skipped" }),
-    ),
-    http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123/jobs", () =>
-      HttpResponse.json({ jobs: [{ id: 1, name: "enrollment", status: "completed", conclusion: "skipped", started_at: null, completed_at: null }] }),
-    ),
+    ...githubHandlers({
+      run: { conclusion: "skipped" },
+      jobs: [{ id: 1, name: "enrollment", status: "completed", conclusion: "skipped", started_at: null, completed_at: null }],
+    }),
   );
 
   const projection = await getFactoryRunProjection(
@@ -473,13 +471,10 @@ test("Private repositories are rejected before exposing Actions data", async () 
 
 test("Skipped reusable Worker runs remain an observation gap, not a Worker failure", async () => {
   network.use(
-    ...githubHandlers({}),
-    http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123", () =>
-      HttpResponse.json({ ...run, conclusion: "skipped" }),
-    ),
-    http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123/jobs", () =>
-      HttpResponse.json({ jobs: [{ id: 1, name: "enrollment", status: "completed", conclusion: "skipped", started_at: null, completed_at: null }] }),
-    ),
+    ...githubHandlers({
+      run: { conclusion: "skipped" },
+      jobs: [{ id: 1, name: "enrollment", status: "completed", conclusion: "skipped", started_at: null, completed_at: null }],
+    }),
   );
 
   const projection = await getFactoryRunProjection(githubEnv, cloudflareEnv, "uichat-mira/mira-mobile", 123, Date.parse("2026-11-18T06:12:30Z"));
@@ -490,10 +485,9 @@ test("Skipped reusable Worker runs remain an observation gap, not a Worker failu
 
 test("Non-Worker GitHub runs are rejected", async () => {
   network.use(
-    ...githubHandlers({}),
-    http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123", () =>
-      HttpResponse.json({ ...run, name: "Mira External Worker", referenced_workflows: [] }),
-    ),
+    ...githubHandlers({
+      run: { name: "Mira External Worker", referenced_workflows: [] },
+    }),
   );
 
   await assert.rejects(
