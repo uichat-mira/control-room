@@ -492,7 +492,7 @@ test("Non-Worker GitHub runs are rejected", async () => {
   network.use(
     ...githubHandlers({}),
     http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123", () =>
-      HttpResponse.json({ ...run, name: "CI", referenced_workflows: [] }),
+      HttpResponse.json({ ...run, name: "Mira External Worker", referenced_workflows: [] }),
     ),
   );
 
