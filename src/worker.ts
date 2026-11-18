@@ -8,7 +8,7 @@ import {
 } from "./github";
 import { openApiDocument } from "./openapi";
 import { getServiceSnapshot } from "./services";
-import { getFactoryRunProjection } from "./factory-read-model";
+import { getFactoryRunProjection, type FactoryRunProjection } from "./factory-read-model";
 import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
 
 const AUTH_GITHUB_TTL_SECONDS = 15 * 60;
@@ -82,6 +82,42 @@ function governanceCacheKeys(request: Request, env: Env) {
     fresh: new Request(`${prefix}-fresh`, { method: "GET" }),
     stale: new Request(`${prefix}-stale`, { method: "GET" }),
   };
+}
+
+function factoryCacheKey(request: Request, repository: string, runId: number) {
+  const url = new URL(request.url);
+  const key = new URL("/api/__factory-v1", url.origin);
+  key.searchParams.set("repository", repository);
+  key.searchParams.set("runId", String(runId));
+  return new Request(key, { method: "GET" });
+}
+
+function factoryCacheTtl(snapshot: FactoryRunProjection) {
+  if (snapshot.run.status !== "completed") return 15;
+  if (snapshot.reporter.status === "available" && snapshot.reporter.events.length > 0) return 60 * 60;
+  if (snapshot.run.conclusion === "skipped") return 10 * 60;
+  return 60;
+}
+
+async function cachedFactoryRun(
+  request: Request,
+  env: Env,
+  repository: string,
+  runId: number,
+): Promise<FactoryRunProjection> {
+  try {
+    const workerCaches = caches as CacheStorage & { default: Cache };
+    const edgeCache = workerCaches.default;
+    const key = factoryCacheKey(request, repository, runId);
+    const cached = await edgeCache.match(key);
+    if (cached) return (await cached.json()) as FactoryRunProjection;
+
+    const next = await getFactoryRunProjection(env, env, repository, runId);
+    await edgeCache.put(key, cacheResponse(next, factoryCacheTtl(next)));
+    return next;
+  } catch {
+    return getFactoryRunProjection(env, env, repository, runId);
+  }
 }
 
 function cloudflareCacheKey(request: Request, env: Env) {
@@ -384,7 +420,7 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
     }
 
     try {
-      const projection = await getFactoryRunProjection(env, env, repository, runId);
+      const projection = await cachedFactoryRun(request, env, repository, runId);
       return publicApiJson(v1Envelope(projection), {
         headers: {
           "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
