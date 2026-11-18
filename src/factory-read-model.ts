@@ -176,6 +176,7 @@ interface HaomaiQueryResponse {
           received_at?: string;
           app_id?: string;
           trust_class?: string;
+          level?: string;
           event_id?: string;
           occurred_at?: string;
           kind?: string;
@@ -387,6 +388,7 @@ async function reporterEvents(
       .map((row) => row.source)
       .filter((source): source is NonNullable<typeof source> => Boolean(source))
       .filter((source) => source.repository === repository)
+      .filter((source) => source.run_id === String(run.id))
       .filter((source) => source.schema === "haomai.telemetry.v1")
       .map((source) => ({
         occurredAt: source.occurred_at ?? source.received_at ?? new Date(now).toISOString(),
