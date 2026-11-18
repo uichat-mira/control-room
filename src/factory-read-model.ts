@@ -216,6 +216,9 @@ async function optionalGithub<T>(env: GitHubEnv, path: string): Promise<T | null
   return response.json() as Promise<T>;
 }
 
+// Legacy binding name: CLOUDFLARE_READ_TOKEN is the server-only runtime token.
+ // The ad-hoc Observability query API currently requires Workers Observability Write/Edit
+ // permission; the token is never serialized into the browser projection.
 async function cloudflare<T>(env: CloudflareEnv, path: string, body: unknown): Promise<T> {
   if (!env.CLOUDFLARE_ACCOUNT_ID || !env.CLOUDFLARE_READ_TOKEN) {
     throw new Error("Cloudflare read credentials not configured");
