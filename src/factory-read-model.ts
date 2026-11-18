@@ -318,8 +318,18 @@ function deriveState(
     return { state: "artifact_unavailable", repairRound: null };
   }
 
-  if (run.status === "completed" && run.conclusion && run.conclusion !== "success") {
+  if (
+    run.status === "completed" &&
+    ["failure", "timed_out", "startup_failure"].includes(run.conclusion ?? "")
+  ) {
     return { state: "worker_failed", repairRound: null };
+  }
+
+  if (
+    run.status === "completed" &&
+    ["skipped", "cancelled", "neutral", "action_required"].includes(run.conclusion ?? "")
+  ) {
+    return { state: "observation_gap", repairRound: null };
   }
 
   if (run.status === "completed" && run.conclusion === "success") {
