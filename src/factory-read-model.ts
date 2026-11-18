@@ -166,10 +166,9 @@ interface CloudflareEnvelope<T> {
   errors?: Array<{ code?: number; message?: string }>;
 }
 
-interface HaomaiQueryResponse {
-  result?: {
-    events?: {
-      events?: Array<{
+interface HaomaiQueryResult {
+  events?: {
+    events?: Array<{
         source?: {
           event?: string;
           schema?: string;
@@ -380,7 +379,7 @@ async function reporterEvents(
   }
 
   try {
-    const payload = await cloudflare<HaomaiQueryResponse>(env, "/workers/observability/telemetry/query", {
+    const payload = await cloudflare<HaomaiQueryResult>(env, "/workers/observability/telemetry/query", {
       queryId: "mira-control-room-factory-tv",
       timeframe: { from, to },
       view: "events",
@@ -396,7 +395,7 @@ async function reporterEvents(
       },
     });
 
-    const rows = payload.result?.events?.events ?? [];
+    const rows = payload.events?.events ?? [];
     const events: FactoryEvent[] = rows
       .map((row) => row.source)
       .filter((source): source is NonNullable<typeof source> => Boolean(source))
