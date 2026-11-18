@@ -304,7 +304,7 @@ export function openApiDocument(origin: string) {
                 referencedExternalWorker: { type: "boolean", const: true },
               },
             },
-            state: { type: "string" },
+            state: { enum: ["queued", "working", "candidate_captured", "validating", "repairing", "validation_gap", "blocked", "verified", "delivery_retry", "delivered", "escalated", "worker_failed", "observation_gap", "logs_expired", "artifact_unavailable", "unknown"] },
             repairRound: { type: ["integer", "null"], minimum: 1, maximum: 2 },
             freshness: { enum: ["fresh", "stale", "expired", "unavailable"] },
             provenance: { type: "array", items: { $ref: "#/components/schemas/FactoryEvidence" } },
@@ -315,7 +315,7 @@ export function openApiDocument(origin: string) {
               type: "object",
               required: ["status", "freshness", "events", "observedAt"],
               properties: {
-                status: { enum: ["available", "unavailable", "expired", "not_configured"] },
+                status: { enum: ["available", "unavailable", "expired", "not_configured", "not_expected"] },
                 freshness: { enum: ["fresh", "stale", "expired", "unavailable"] },
                 events: { type: "array", items: { $ref: "#/components/schemas/FactoryEvent" } },
                 observedAt: { type: ["string", "null"], format: "date-time" },
