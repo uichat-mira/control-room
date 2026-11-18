@@ -377,7 +377,10 @@ async function reporterEvents(
   // The trusted_reporter job runs once, at the end of the reusable Worker lifecycle.
   // Do not scan the whole Worker run: active runs have no Reporter evidence yet, and
   // completed runs only need a narrow tail window around the final GitHub update.
-  if (run.status !== "completed") {
+  if (
+    run.status !== "completed" ||
+    ["skipped", "cancelled", "neutral", "action_required"].includes(run.conclusion ?? "")
+  ) {
     return { status: "unavailable", freshness, events: [], observedAt: null };
   }
 
