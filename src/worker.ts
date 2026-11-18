@@ -8,6 +8,7 @@ import {
 } from "./github";
 import { openApiDocument } from "./openapi";
 import { getServiceSnapshot } from "./services";
+import { getFactoryRunProjection } from "./factory-read-model";
 import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
 
 const AUTH_GITHUB_TTL_SECONDS = 15 * 60;
@@ -302,6 +303,7 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
         "/api/v1/analytics",
         "/api/v1/governance",
         "/api/v1/projects",
+        "/api/v1/factory/run?repository=uichat-mira/mira-mobile&runId=...",
       ],
     });
   }
@@ -366,6 +368,42 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
       generatedAt: new Date().toISOString(),
       ...cloudflare.analytics24h,
     }));
+  }
+
+  if (pathname === "/api/v1/factory/run") {
+    const url = new URL(request.url);
+    const repository = url.searchParams.get("repository");
+    const rawRunId = url.searchParams.get("runId");
+    const runId = rawRunId ? Number(rawRunId) : NaN;
+
+    if (!repository || !Number.isSafeInteger(runId) || runId <= 0) {
+      return publicApiJson(v1Envelope({
+        status: "invalid_request",
+        error: "repository_and_positive_runId_required",
+      }), { status: 400 });
+    }
+
+    try {
+      const projection = await getFactoryRunProjection(env, env, repository, runId);
+      return publicApiJson(v1Envelope(projection), {
+        headers: {
+          "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
+          "x-mira-factory-source": "github+trusted-reporter",
+        },
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "factory_run_unavailable";
+      const status = [
+        "unsupported_repository",
+        "repository_not_public",
+        "invalid_run_id",
+        "not_external_worker_run",
+      ].includes(reason) ? 404 : 503;
+      return publicApiJson(v1Envelope({
+        status: "unavailable",
+        error: reason,
+      }), { status });
+    }
   }
 
   if (pathname === "/api/v1/governance" || pathname === "/api/v1/projects") {
