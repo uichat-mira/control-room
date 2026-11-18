@@ -131,6 +131,52 @@ test("Reporter evidence from a previous run attempt is ignored", async () => {
   assert.equal(projection.state, "observation_gap");
 });
 
+test("Reporter query is bounded to the lifecycle tail instead of the whole run", async () => {
+  let observedBody: any = null;
+  network.use(
+    ...githubHandlers({}),
+    http.post(
+      "https://api.cloudflare.com/client/v4/accounts/account/workers/observability/telemetry/query",
+      async ({ request }) => {
+        observedBody = await request.json();
+        return HttpResponse.json({ success: true, result: { events: { count: 0, events: [] } } });
+      },
+    ),
+  );
+
+  await getFactoryRunProjection(
+    githubEnv,
+    cloudflareEnv,
+    "uichat-mira/mira-mobile",
+    123,
+    Date.parse("2026-11-18T06:12:30Z"),
+  );
+
+  assert.equal(observedBody.timeframe.from, Date.parse("2026-11-18T06:09:00Z"));
+  assert.equal(observedBody.timeframe.to, Date.parse("2026-11-18T06:12:30Z"));
+  assert.deepEqual(observedBody.parameters.datasets, ["workers"]);
+});
+
+test("Skipped Worker runs do not trigger an Observability scan", async () => {
+  network.use(
+    ...githubHandlers({}),
+    http.get("https://api.github.com/repos/uichat-mira/mira-mobile/actions/runs/123", () =>
+      HttpResponse.json({ ...run, conclusion: "skipped" }),
+    ),
+  );
+
+  const projection = await getFactoryRunProjection(
+    githubEnv,
+    cloudflareEnv,
+    "uichat-mira/mira-mobile",
+    123,
+    Date.parse("2026-11-18T06:12:30Z"),
+  );
+
+  assert.equal(projection.reporter.events.length, 0);
+  assert.equal(projection.state, "observation_gap");
+});
+
 test("Reporter outage becomes observation gap, never Worker failure or Verify PASS", async () => {
   network.use(
     ...githubHandlers({}),
