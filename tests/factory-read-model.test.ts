@@ -127,7 +127,7 @@ test("Reporter evidence from a previous run attempt is ignored", async () => {
 
   const projection = await getFactoryRunProjection(githubEnv, cloudflareEnv, "uichat-mira/mira-mobile", 123, Date.parse("2026-11-18T06:12:30Z"));
 
-  assert.equal(projection.reporter.status, "not_expected");
+  assert.equal(projection.reporter.status, "available");
   assert.equal(projection.reporter.events.length, 0);
   assert.equal(projection.state, "observation_gap");
 });
@@ -174,6 +174,7 @@ test("Skipped Worker runs do not trigger an Observability scan", async () => {
     Date.parse("2026-11-18T06:12:30Z"),
   );
 
+  assert.equal(projection.reporter.status, "not_expected");
   assert.equal(projection.reporter.events.length, 0);
   assert.equal(projection.state, "observation_gap");
 });
