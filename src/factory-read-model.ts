@@ -254,11 +254,8 @@ async function cloudflare<T>(env: CloudflareEnv, path: string, body: unknown): P
 }
 
 function isExternalWorkerRun(run: GitHubRun): boolean {
-  return (
-    /mira external worker/i.test(run.name) ||
-    (run.referenced_workflows ?? []).some((workflow) =>
-      workflow.path?.includes("uichat-mira/.github/.github/workflows/mira-external-worker.yml"),
-    )
+  return (run.referenced_workflows ?? []).some((workflow) =>
+    workflow.path?.includes("uichat-mira/.github/.github/workflows/mira-external-worker.yml"),
   );
 }
 
