@@ -148,6 +148,23 @@ test("Reporter outage becomes observation gap, never Worker failure or Verify PA
   assert.ok(projection.warnings.some((warning) => /Reporter unavailable/.test(warning)));
 });
 
+test("A successful empty Reporter query is available observation, not an outage", async () => {
+  network.use(
+    ...githubHandlers({}),
+    http.post(
+      "https://api.cloudflare.com/client/v4/accounts/account/workers/observability/telemetry/query",
+      () => HttpResponse.json({ success: true, result: { events: { count: 0, events: [] } } }),
+    ),
+  );
+
+  const projection = await getFactoryRunProjection(githubEnv, cloudflareEnv, "uichat-mira/mira-mobile", 123, Date.parse("2026-11-18T06:12:30Z"));
+
+  assert.equal(projection.reporter.status, "available");
+  assert.equal(projection.reporter.events.length, 0);
+  assert.equal(projection.state, "observation_gap");
+  assert.ok(projection.warnings.some((warning) => /no trusted event/i.test(warning)));
+});
+
 test("Expired Reporter retention remains separate from GitHub evidence", async () => {
   network.use(
     ...githubHandlers({}),
