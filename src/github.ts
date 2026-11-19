@@ -78,16 +78,28 @@ interface GitHubLatestReleasesGraphQL {
   nodes: Array<GitHubRepositoryNode | null>;
 }
 
-interface GitHubSearchResult {
-  total_count: number;
+interface GitHubGovernanceRuleNode {
+  repositoryRuleset: { id: string } | null;
 }
 
-interface GitHubBranch {
-  protected: boolean;
+interface GitHubGovernanceRef {
+  branchProtectionRule: { id: string } | null;
+  rules: {
+    totalCount: number;
+    nodes: Array<GitHubGovernanceRuleNode | null>;
+    pageInfo: { hasNextPage: boolean };
+  };
 }
 
-interface GitHubRuleset {
-  enforcement: "active" | "disabled" | "evaluate" | string;
+interface GitHubGovernanceNode {
+  name: string;
+  issues: { totalCount: number };
+  pullRequests: { totalCount: number };
+  defaultBranchRef: GitHubGovernanceRef | null;
+}
+
+interface GitHubGovernanceGraphQL {
+  nodes: Array<GitHubGovernanceNode | null>;
 }
 
 interface GitHubProjectNode {
@@ -252,33 +264,106 @@ async function latestReleases(
   }
 }
 
-async function governance(env: GitHubEnv, repo: GitHubRepo): Promise<RepositoryGovernance> {
-  const repoName = encodeURIComponent(repo.name);
-  const branchName = encodeURIComponent(repo.default_branch);
-  const issueQuery = encodeURIComponent(`repo:${ORG}/${repo.name} is:issue is:open`);
-  const prQuery = encodeURIComponent(`repo:${ORG}/${repo.name} is:pr is:open`);
-
-  // Counts use Search total_count instead of paging every open issue. This keeps the
-  // governance read bounded under Workers Free's external subrequest ceiling.
-  const [issuesResult, prsResult, branchResult, rulesetsResult] = await Promise.allSettled([
-    request<GitHubSearchResult>(env, `/search/issues?q=${issueQuery}&per_page=1`),
-    request<GitHubSearchResult>(env, `/search/issues?q=${prQuery}&per_page=1`),
-    request<GitHubBranch>(env, `/repos/${ORG}/${repoName}/branches/${branchName}`),
-    request<GitHubRuleset[]>(env, `/repos/${ORG}/${repoName}/rulesets?includes_parents=true&per_page=100`),
-  ]);
-
-  const failed = [issuesResult, prsResult, branchResult, rulesetsResult].some((result) => result.status === "rejected");
-
+function unavailableGovernance(): RepositoryGovernance {
   return {
-    status: failed ? "partial" : "connected",
-    openIssues: issuesResult.status === "fulfilled" ? issuesResult.value.total_count : null,
-    openPullRequests: prsResult.status === "fulfilled" ? prsResult.value.total_count : null,
-    defaultBranchProtected: branchResult.status === "fulfilled" ? branchResult.value.protected : null,
-    activeRulesets:
-      rulesetsResult.status === "fulfilled"
-        ? rulesetsResult.value.filter((ruleset) => ruleset.enforcement === "active").length
-        : null,
+    status: "partial",
+    openIssues: null,
+    openPullRequests: null,
+    defaultBranchProtected: null,
+    activeRulesets: null,
   };
+}
+
+async function governanceRows(
+  env: GitHubEnv,
+  repositories: GitHubRepo[],
+): Promise<{ rows: Map<string, RepositoryGovernance>; error?: string }> {
+  if (repositories.length === 0) return { rows: new Map() };
+  if (!env.GITHUB_READ_TOKEN) {
+    return {
+      rows: new Map(),
+      error: "Authenticated GitHub token required for bounded governance projection",
+    };
+  }
+
+  const query = `
+    query MiraGovernanceRows($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on Repository {
+          name
+          issues(states: OPEN) { totalCount }
+          pullRequests(states: OPEN) { totalCount }
+          defaultBranchRef {
+            branchProtectionRule { id }
+            rules(first: 100) {
+              totalCount
+              pageInfo { hasNextPage }
+              nodes {
+                repositoryRuleset { id }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  try {
+    const response = await fetch(GRAPHQL, {
+      method: "POST",
+      headers: {
+        ...headers(env),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        query,
+        variables: { ids: repositories.map((repo) => repo.node_id) },
+      }),
+    });
+    if (!response.ok) throw new Error(`GitHub GraphQL ${response.status}`);
+
+    const payload = (await response.json()) as GitHubGraphQLResponse<GitHubGovernanceGraphQL>;
+    if (payload.errors?.length) {
+      throw new Error(payload.errors.map((error) => error.message).join(" · "));
+    }
+
+    const rows = new Map<string, RepositoryGovernance>();
+    for (const repository of payload.data?.nodes ?? []) {
+      if (!repository) continue;
+      const ref = repository.defaultBranchRef;
+      if (!ref) {
+        rows.set(repository.name, {
+          ...unavailableGovernance(),
+          openIssues: repository.issues.totalCount,
+          openPullRequests: repository.pullRequests.totalCount,
+        });
+        continue;
+      }
+
+      const activeRulesets = new Set(
+        ref.rules.nodes
+          .map((rule) => rule?.repositoryRuleset?.id ?? null)
+          .filter((id): id is string => Boolean(id)),
+      );
+      const completeRulesetProjection = !ref.rules.pageInfo.hasNextPage;
+
+      rows.set(repository.name, {
+        status: completeRulesetProjection ? "connected" : "partial",
+        openIssues: repository.issues.totalCount,
+        openPullRequests: repository.pullRequests.totalCount,
+        defaultBranchProtected:
+          ref.branchProtectionRule !== null || ref.rules.totalCount > 0,
+        activeRulesets: completeRulesetProjection ? activeRulesets.size : null,
+      });
+    }
+
+    return { rows };
+  } catch (error) {
+    return {
+      rows: new Map(),
+      error: error instanceof Error ? error.message : "GitHub governance batch unavailable",
+    };
+  }
 }
 
 async function projects(env: GitHubEnv): Promise<GitHubOrganizationObservability["projects"]> {
@@ -436,28 +521,32 @@ export async function getGitHubGovernanceSnapshot(env: GitHubEnv = {}): Promise<
       env,
       `/orgs/${ORG}/repos?type=public&sort=updated&direction=desc&per_page=100`,
     );
-    const [governanceRows, publicProjects] = await Promise.all([
-      Promise.all(repositories.map((repo) => governance(env, repo))),
+    const [governanceResult, publicProjects] = await Promise.all([
+      governanceRows(env, repositories),
       projects(env),
     ]);
+    const repositoryRows = repositories.map((repo) => ({
+      name: repo.name,
+      fullName: repo.full_name,
+      htmlUrl: repo.html_url,
+      defaultBranch: repo.default_branch,
+      governance: governanceResult.rows.get(repo.name) ?? unavailableGovernance(),
+    }));
     const governanceStatus =
-      publicProjects.status === "connected" && governanceRows.every((row) => row.status === "connected")
+      !governanceResult.error &&
+      publicProjects.status === "connected" &&
+      repositoryRows.every((row) => row.governance.status === "connected")
         ? "connected"
         : "partial";
 
     return {
-      status: "connected",
+      status: governanceResult.error ? "degraded" : "connected",
       generatedAt,
       authenticated,
       governanceStatus,
       projects: publicProjects,
-      repositories: repositories.map((repo, index) => ({
-        name: repo.name,
-        fullName: repo.full_name,
-        htmlUrl: repo.html_url,
-        defaultBranch: repo.default_branch,
-        governance: governanceRows[index],
-      })),
+      repositories: repositoryRows,
+      ...(governanceResult.error ? { error: governanceResult.error } : {}),
     };
   } catch (error) {
     return {
