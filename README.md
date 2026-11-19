@@ -118,15 +118,13 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 - `/governance` — Issues, pull requests, default-branch protection, rulesets, and public Projects
 - `/wall` — large-screen operations view; forced dark theme and 60-second refresh
 - `/factory` — real GitHub External Worker status wall; discovers recent non-skipped Runs and refreshes every 60 seconds without Workers Logs queries
-- `/factory?mode=demo` — clearly labelled historical synthetic Factory TV design fixture
 - `/factory?mode=real&repository=uichat-mira/<repo>&runId=<run>` — real, sanitized External Worker lifecycle projection
-- `/factory/demo-01` (and `demo-02`, `demo-03`) — single-station timeline demo using explicitly synthetic events
-- `/factory/broadcast` — fact-based industrial satire / broadcast copy demo
+- `/factory/broadcast` — explicitly shows 功能开发中 until trustworthy broadcasting events are connected
 - `/docs` — public API and MCP documentation
 
 The UI is intentionally split by operational question rather than by raw data table. Engineering, Runtime, and Governance use focused `/api/v1/*` reads; only Overview and Wall use the cross-domain summary.
 
-**Factory TV scope:** Factory TV is an independent presentation mode beside Wall, not a fifth business domain. The default wall discovers real public Worker Runs through a bounded GitHub-only read (24-repository cap, 14-day window, 12 displayed Runs); a partial source or no Runs is explicit. Demo stations require `?mode=demo`. The selected workstation is GitHub-only; optional Reporter inspection is an explicit detail action, not part of wall polling. No raw Worker logs, Cloudflare credentials, prompts, model output, or invented heartbeat reach the browser. GitHub remains authoritative for lifecycle evidence.
+**Factory TV scope:** Factory TV is an independent presentation mode beside Wall, not a fifth business domain. The default wall discovers real public Worker Runs through a bounded GitHub-only read (24-repository cap, 14-day window, 12 displayed Runs); a partial source or no Runs is explicit. Synthetic stations have been removed and legacy paths redirect to the real Factory TV. The selected workstation is GitHub-only; optional Reporter inspection is an explicit detail action, not part of wall polling. No raw Worker logs, Cloudflare credentials, prompts, model output, or invented heartbeat reach the browser. GitHub remains authoritative for lifecycle evidence.
 
 ## Local development
 
