@@ -244,7 +244,7 @@ export default function App() {
       <Route path="wall" element={<WallRoute />} />
       <Route path="factory" element={<FactoryRoute />} />
       <Route path="factory/broadcast" element={<FactoryRoute />} />
-      <Route path="factory/:runId" element={<FactoryRoute />} />
+      <Route path="factory/:runId" element={<Navigate to="/factory" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
