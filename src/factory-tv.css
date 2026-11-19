@@ -86,7 +86,7 @@
   align-items: center;
   gap: 7px;
 }
-.factory-demo-label {
+.factory-source-label {
   border: 1px solid #70756c;
   padding: 5px 8px;
   color: #dddaca;
@@ -419,7 +419,7 @@
   .factory-masthead-main p { text-align: left; font-size: 11px; }
   .factory-masthead h2 { font-size: clamp(31px, 8vw, 46px); }
   .factory-micro { font-size: 9px; }
-  .factory-demo-label { font-size: 9px; }
+  .factory-source-label { font-size: 9px; }
   .factory-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .factory-stats > div { min-height: 91px; padding: 13px 15px; }
   .factory-stats > div:nth-child(2) { border-right: 0; }
@@ -474,3 +474,6 @@
 .factory-timeline-title small,
 .factory-event strong,
 .factory-event p { overflow-wrap: anywhere; }
+
+.factory-tab-current { display: inline-flex; align-items: center; gap: 7px; min-height: 47px; padding: 0 14px; color: var(--ft-text); border-bottom: 2px solid var(--ft-red); font-size: 12px; font-weight: 680; white-space: nowrap; }
+@media (max-width: 650px) { .factory-tab-current { padding: 0 11px; font-size: 11px; } }
