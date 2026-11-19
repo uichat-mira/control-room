@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, NavLink, useLocation, useParams, useSearchParams } from "react-router";
 import { Activity, ArrowRight, CircleAlert, Clock3, ExternalLink, Radio, ShieldCheck } from "lucide-react";
 import type { FactoryRunProjection, FactoryState } from "./factory-read-model";
+import type { FactoryFeed, FactoryFeedItem } from "./factory-feed";
 import "./factory-tv.css";
 
-// Frontend design fixtures only. Real data requires a separate public-safe read model.
-// Never expose GitHub credentials or Cloudflare Observability queries to this browser.
+// Demo fixtures are explicitly opt-in. The default wall uses sanitized GitHub reads.
+// Privileged Cloudflare Observability queries remain server-only and on-demand.
 type Tone = "working" | "observing" | "failed";
 type Track = "done" | "current" | "error" | "pending";
 type Fact = { at: string; title: string; detail: string; tone: "normal" | "warning" | "failure" };
@@ -165,6 +166,7 @@ const liveStation = (projection: FactoryRunProjection): Station => {
     projection.reporter.status === "expired" ? "Reporter 日志已过期 · GitHub 仍可追溯" :
     projection.reporter.status === "not_configured" ? "Reporter 未配置 · 仅显示 GitHub 事实" :
     projection.reporter.status === "not_expected" ? "Reporter 当前不应产生事件 · 仅显示 GitHub 事实" :
+    projection.reporter.status === "not_requested" ? "GitHub-only · 尚未请求号脉日志" :
     "Reporter unavailable · 不视为 Worker failure";
 
   return {
@@ -193,7 +195,7 @@ function Signal({ tone, text }: { tone: Tone; text: string }) {
 function Progress({ steps }: { steps: Station["track"] }) {
   const labels = ["施工", "验证", "交付", "恢复"];
   return (
-    <div className="factory-track" role="img" aria-label="施工、验证、交付、恢复四阶段示例进度">
+    <div className="factory-track" role="img" aria-label="施工、验证、交付、恢复四阶段证据摘要；未执行步骤不代表已完成">
       {steps.map((step, i) => <span key={labels[i]} title={labels[i] + "：" + step} className={step} />)}
     </div>
   );
@@ -231,7 +233,7 @@ function StationCard({ station, active, choose }: { station: Station; active: bo
   return (
     <button type="button" className={"factory-station " + (active ? "selected" : "")} onClick={choose} aria-pressed={active}>
       <span className="factory-station-top">
-        <span className="factory-micro">{station.mode === "real" ? "LIVE / WORKSTATION" : "CAM " + station.camera + " / WORKSTATION"}</span>
+        <span className="factory-micro">{station.mode === "real" ? "GITHUB / WORKSTATION" : "CAM " + station.camera + " / WORKSTATION"}</span>
         <Signal tone={station.tone} text={station.status} />
       </span>
       <strong className="factory-station-name">{station.repository}</strong>
@@ -258,6 +260,173 @@ function Broadcast() {
   );
 }
 
+function stationFromFeed(item: FactoryFeedItem, camera: string): Station {
+  const active = item.status === "in_progress" || item.status === "queued";
+  const failed = ["failure", "timed_out", "startup_failure"].includes(item.conclusion ?? "");
+  const tone: Tone = active ? "working" : failed ? "failed" : "observing";
+  const outcome = item.conclusion ?? item.status;
+  return {
+    id: "real-" + item.id,
+    camera,
+    repository: item.repository.split("/").at(-1) ?? item.repository,
+    task: "RUN " + item.id,
+    model: "GitHub Actions",
+    headline: active
+      ? "GitHub 执行中 · 不等于模型持续活动"
+      : "GitHub Run 已结束 · " + outcome + "（不是 Verify 结论）",
+    status: (active ? item.status : outcome).toUpperCase(),
+    tone,
+    duration: formatTime(item.updatedAt) + " 更新",
+    lastEvidence: "GitHub Run #" + item.id,
+    track: active ? ["current", "pending", "pending", "pending"]
+      : failed ? ["error", "pending", "pending", "pending"]
+      : ["done", "pending", "pending", "pending"],
+    facts: [
+      { at: formatTime(item.createdAt), title: "GitHub Run 创建", detail: item.repository + " · " + item.title, tone: "normal" },
+      { at: formatTime(item.updatedAt), title: "GitHub Actions 最新状态",
+        detail: item.status + " / " + outcome + " · 仅为 GitHub 运行结果",
+        tone: failed ? "failure" : active ? "warning" : "normal" },
+    ],
+    broadcast: "Run #" + item.id + " 来自 GitHub Actions。" +
+      " 运行状态不等于模型正在操作；验证和交付须查看独立证据。",
+    mode: "real",
+  };
+}
+
+function FactoryLiveWall() {
+  const [feed, setFeed] = useState<FactoryFeed | null>(null);
+  const [feedError, setFeedError] = useState<string | null>(null);
+  const [chosenId, setChosenId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<FactoryRunProjection | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const refresh = async () => {
+      if (document.visibilityState === "hidden") return;
+      try {
+        const response = await fetch("/api/v1/factory/runs", { signal: controller.signal, cache: "no-cache" });
+        if (!response.ok) throw new Error("GitHub 施工记录暂时无法读取（HTTP " + response.status + "）");
+        const value = await response.json() as FactoryFeed;
+        if (value.source !== "github-actions" || !Array.isArray(value.items)) {
+          throw new Error("GitHub 施工记录格式不正确");
+        }
+        if (!controller.signal.aborted) {
+          setFeed(value);
+          setFeedError(null);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setFeedError(error instanceof Error ? error.message : "GitHub 施工记录暂时不可读");
+        }
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 60000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, []);
+
+  const items = feed?.items ?? [];
+  const selectedItem = items.find((item) => item.id === chosenId) ?? items[0] ?? null;
+  useEffect(() => {
+    if (!selectedItem) {
+      setDetail(null);
+      setDetailError(null);
+      return;
+    }
+    const controller = new AbortController();
+    setDetail(null);
+    setDetailError(null);
+    const url = new URL("/api/v1/factory/run", window.location.origin);
+    url.searchParams.set("repository", selectedItem.repository);
+    url.searchParams.set("runId", String(selectedItem.id));
+    url.searchParams.set("includeReporter", "false");
+    fetch(url, { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error("工位的 GitHub 详细记录暂时不可读");
+      return await response.json() as FactoryRunProjection;
+    }).then((value) => {
+      if (!controller.signal.aborted) setDetail(value);
+    }).catch(() => {
+      if (!controller.signal.aborted) setDetailError("详细记录不可用，仍可从 GitHub 查看原始 Run");
+    });
+    return () => controller.abort();
+  }, [selectedItem?.repository, selectedItem?.id]);
+
+  const stationsReal = items.map((item, index) =>
+    stationFromFeed(item, String(index + 1).padStart(2, "0")));
+  const selected = selectedItem ? (
+    detail?.run.id === selectedItem.id
+      ? { ...liveStation(detail), camera: String(items.indexOf(selectedItem) + 1).padStart(2, "0") }
+      : stationsReal.find((station) => station.id === "real-" + selectedItem.id) ?? null
+  ) : null;
+  const activeCount = items.filter((item) => item.status === "queued" || item.status === "in_progress").length;
+  const failedCount = items.filter((item) => ["failure", "timed_out", "startup_failure"].includes(item.conclusion ?? "")).length;
+
+  return (
+    <>
+      <div className="factory-stats" aria-label="GitHub 真实施工记录">
+        <div><span>发现工位 / GITHUB</span><strong>{feed ? items.length : "—"}</strong><small>近 {feed?.historyDays ?? 14} 天，跳过未执行 Run</small></div>
+        <div><span>执行中 / ACTIONS</span><strong className="factory-value-ok">{feed ? activeCount : "—"}</strong><small>不推断模型持续活动</small></div>
+        <div><span>失败 / ACTIONS</span><strong className="factory-value-failed">{feed ? failedCount : "—"}</strong><small>失败不等于 Candidate 丢失</small></div>
+        <div><span>数据来源</span><strong className="factory-feed-source">{feed?.status === "partial" ? "部分可用" : feed ? "GITHUB" : "—"}</strong>
+          <small>{feed ? "扫描 " + feed.scannedRepositories + " 个公开仓库" : "正在发现工位"}</small></div>
+      </div>
+      <div className="factory-content">
+        <div className="factory-section-title"><strong>一号车间 / 真实施工记录</strong><small>GITHUB ACTIONS · 60S REFRESH</small></div>
+        {feedError && <p className="factory-feed-alert" role="alert">{feedError}。{feed ? "以下为上次成功取得的快照。" : "没有使用演示数据填充。"}</p>}
+        {feed?.status === "partial" &&
+          <p className="factory-feed-alert">当前只读取部分公开仓库：{feed.failedRepositories} 个来源失败
+            {feed.coverageLimited ? "，超出当次扫描上限" : ""}。这些数字不是组织总量。</p>}
+        {!feed && !feedError ? (
+          <div className="factory-missing"><Activity size={19}/><strong>正在寻找真实施工记录</strong>
+            <p>只查询 GitHub Actions，不扫描 Cloudflare Logs。</p></div>
+        ) : items.length === 0 ? (
+          <div className="factory-missing"><ShieldCheck size={19}/><strong>{feedError ? "暂无可读取的真实工位" : "当前没有可显示的施工记录"}</strong>
+            <p>{feedError ? "GitHub 不可用，不能判断是否空闲。" : "最近 " + feed?.historyDays + " 天内未发现实际执行的 External Worker Run；不会用假工位填充。"}</p>
+            <Link to="/factory?mode=demo">查看设计演示 <ArrowRight size={14}/></Link></div>
+        ) : (
+          <>
+            <div className="factory-grid">
+              <div className="factory-station-list">
+                {stationsReal.map((station) =>
+                  <StationCard key={station.id} station={station}
+                    active={selected?.id === station.id}
+                    choose={() => setChosenId(Number(station.id.slice("real-".length)))} />)}
+              </div>
+              {selected && selectedItem && (
+                <div className="factory-detail-side">
+                  <Timeline station={selected}/>
+                  {detailError && <p className="factory-feed-alert">{detailError}</p>}
+                  <div className="factory-live-evidence">
+                    <a href={selectedItem.htmlUrl} target="_blank" rel="noreferrer">GitHub 原始 Run <ExternalLink size={12}/></a>
+                    {detail && <span>Jobs: {detail.jobs.length} · Artifacts: {detail.artifacts.length} · PRs: {detail.pullRequests.length}</span>}
+                  </div>
+                  <Link className="factory-enter-room"
+                    to={"/factory?mode=real&repository=" + encodeURIComponent(selectedItem.repository) + "&runId=" + selectedItem.id}>
+                    查看工位完整证据（按需读取号脉） <ArrowRight size={14}/>
+                  </Link>
+                </div>
+              )}
+            </div>
+            <aside className="factory-ticker" aria-label="真实工程状态播报">
+              <div>红色广播站 <small>CH 05</small></div>
+              <p>{selected?.broadcast ?? "所有施工状态以 GitHub 为准。"}</p>
+            </aside>
+          </>
+        )}
+        <p className="factory-honesty"><ShieldCheck size={14}/> 最近一次 GitHub 快照：
+          {feed ? new Date(feed.generatedAt).toLocaleString() : "尚未取得"}。
+          只有 GitHub 运行状态，不冒充逐工具实时直播。演示模式在 <Link to="/factory?mode=demo">Demo</Link>。</p>
+      </div>
+    </>
+  );
+}
+
 export default function FactoryTV() {
   const { runId } = useParams<{ runId?: string }>();
   const { pathname } = useLocation();
@@ -269,6 +438,8 @@ export default function FactoryTV() {
   const realRequested = realModeRequested || Boolean(realRepository && realRunId);
   const realConfigValid = Boolean(realRepository && realRunId);
   const isRoom = Boolean(runId) && !isBroadcast && !realRequested;
+  const demoMode = isRoom || searchParams.get("mode") === "demo";
+  const autoMode = !isBroadcast && !realRequested && !demoMode;
   const [selectedId, setSelectedId] = useState(stations[0].id);
   const [realProjection, setRealProjection] = useState<FactoryRunProjection | null>(null);
   const [realError, setRealError] = useState<string | null>(null);
@@ -307,7 +478,7 @@ export default function FactoryTV() {
         <div className="factory-masthead-top">
           <span className="factory-micro"><Radio size={12} aria-hidden="true" /> MIRA / CONTROL ROOM / CHANNEL 05</span>
           <div className="factory-masthead-actions">
-            <span className="factory-demo-label">{realRequested ? "REAL READ MODEL · PUBLIC-SAFE" : "DESIGN DEMO · NON-LIVE"}</span>
+            <span className="factory-demo-label">{autoMode ? "GITHUB ACTIONS · REAL" : realRequested ? "REAL READ MODEL · PUBLIC-SAFE" : isBroadcast ? "BROADCAST · SCRIPT PREVIEW" : "DESIGN DEMO · NON-LIVE"}</span>
             <nav className="factory-display-switch" aria-label="展示模式与控制台入口">
               <Link to="/">返回控制台</Link>
               <Link to="/wall">Mira System 大屏 <ExternalLink size={12} aria-hidden="true" /></Link>
@@ -320,7 +491,7 @@ export default function FactoryTV() {
         </div>
       </header>
 
-      <div className="factory-stats" aria-label={realRequested ? "真实运行状态" : "演示数据，不代表真实运行"}>
+      {!autoMode && <div className="factory-stats" aria-label={realRequested ? "真实运行状态" : "演示数据，不代表真实运行"}>
         {realRequested ? (
           <>
             <div><span>当前 Run / REAL</span><strong>{realProjection ? "01" : "—"}</strong><small>{realProjection ? `#${realProjection.run.id}` : "等待读取"}</small></div>
@@ -336,11 +507,11 @@ export default function FactoryTV() {
             <div><span>遗产保全 / DEMO</span><strong>01</strong><small>Candidate 已捕获</small></div>
           </>
         )}
-      </div>
+      </div>}
 
       <nav className="factory-tabs" aria-label="工厂 TV 视图">
         <NavLink to="/factory" end><Activity size={15} /> 工厂直播墙</NavLink>
-        <NavLink to={realRequested ? `/factory?mode=real&repository=${encodeURIComponent(realRepository ?? "")}&runId=${encodeURIComponent(realRunId ?? "")}` : `/factory/${selected.id}`} className={() => isRoom || realRequested ? "active" : ""}><Radio size={15} /> 单工位直播间</NavLink>
+        {!autoMode && <NavLink to={realRequested ? `/factory?mode=real&repository=${encodeURIComponent(realRepository ?? "")}&runId=${encodeURIComponent(realRunId ?? "")}` : `/factory/${selected.id}`} className={() => isRoom || realRequested ? "active" : ""}><Radio size={15} /> 单工位直播间</NavLink>}
         <NavLink to="/factory/broadcast"><CircleAlert size={15} /> 血泪播报栏</NavLink>
       </nav>
 
@@ -371,6 +542,8 @@ export default function FactoryTV() {
             </>
           )}
         </div>
+      ) : autoMode ? (
+        <FactoryLiveWall />
       ) : isRoom ? (
         <div className="factory-content">
           <div className="factory-section-title"><strong>单工位直播间 / 施工追踪</strong><small>TRUSTED EVENT TIMELINE</small></div>
@@ -399,7 +572,7 @@ export default function FactoryTV() {
       )}
       <div className="factory-bottom">
         <span><Clock3 size={12} /> CTRL ROOM / INDUSTRIAL CHANNEL 05</span>
-        <span>{realRequested ? "真实数据 · GitHub / Trusted Reporter · Public-safe projection" : "演示数据 · 无实时 GitHub / Cloudflare 连接"}</span>
+        <span>{autoMode ? "真实数据 · GitHub Actions · 无默认日志扫描" : realRequested ? "真实数据 · GitHub / Trusted Reporter · Public-safe projection" : "演示数据 · 无实时 GitHub / Cloudflare 连接"}</span>
         <Link to="/engineering">Engineering <ExternalLink size={12} /></Link>
       </div>
     </section>
