@@ -16,7 +16,8 @@
     "test:overview": "node --test tests/overview-facts.test.ts",
     "test:engineering": "node --test tests/engineering-facts.test.ts",
     "test:runtime": "node --test tests/runtime-facts.test.ts",
-    "check": "npm run typecheck && npm run test:overview && npm run test:engineering && npm run test:runtime && npm run test:factory && npm run test:github-snapshot && npm run build",
+    "test:governance": "node --test tests/governance-facts.test.ts",
+    "check": "npm run typecheck && npm run test:overview && npm run test:engineering && npm run test:runtime && npm run test:governance && npm run test:factory && npm run test:github-snapshot && npm run build",
     "test:github-snapshot": "node --test tests/github-snapshot.test.ts"
   },
   "dependencies": {
