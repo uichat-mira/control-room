@@ -7,6 +7,7 @@ import "./ops.css";
 import "./governance.css";
 import "./visual.css";
 import "./navigation.css";
+import "./control-shell.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
