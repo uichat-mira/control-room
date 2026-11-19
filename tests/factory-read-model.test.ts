@@ -495,3 +495,15 @@ test("Non-Worker GitHub runs are rejected", async () => {
     /not_external_worker_run/,
   );
 });
+
+test("GitHub-only wall detail never makes a privileged Cloudflare Reporter query", async () => {
+  network.use(...githubHandlers({}));
+  const projection = await getFactoryRunProjection(
+    githubEnv, cloudflareEnv, "uichat-mira/mira-mobile", 123,
+    Date.parse("2026-11-18T06:12:30Z"), false,
+  );
+  assert.equal(projection.reporter.status, "not_requested");
+  assert.equal(projection.reporter.events.length, 0);
+  assert.ok(projection.provenance.some((item) => item.source === "github-run"));
+  assert.ok(projection.warnings.some((message) => message.includes("intentionally not queried")));
+});

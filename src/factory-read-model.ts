@@ -107,7 +107,7 @@ export interface FactoryRunProjection {
   artifacts: FactoryArtifact[];
   pullRequests: FactoryPullRequest[];
   reporter: {
-    status: "available" | "unavailable" | "expired" | "not_configured" | "not_expected";
+    status: "available" | "unavailable" | "expired" | "not_configured" | "not_expected" | "not_requested";
     freshness: FactoryFreshness;
     events: FactoryEvent[];
     observedAt: string | null;
@@ -486,6 +486,7 @@ export async function getFactoryRunProjection(
   repository: string,
   runId: number,
   now = Date.now(),
+  includeReporter = true,
 ): Promise<FactoryRunProjection> {
   if (!/^uichat-mira\/[A-Za-z0-9_.-]+$/.test(repository)) {
     throw new Error("unsupported_repository");
@@ -534,7 +535,9 @@ export async function getFactoryRunProjection(
     ),
   ]);
 
-  const reporter = await reporterEvents(cloudflareEnv, run, repository, jobsResult.jobs, now);
+  const reporter: FactoryRunProjection["reporter"] = includeReporter
+    ? await reporterEvents(cloudflareEnv, run, repository, jobsResult.jobs, now)
+    : { status: "not_requested", freshness: "unavailable", events: [], observedAt: null };
 
   const jobs = jobsResult.jobs.map((job) => ({
     id: job.id,
@@ -614,6 +617,7 @@ export async function getFactoryRunProjection(
     warnings: [
       ...(reporter.status === "unavailable" ? ["Reporter unavailable; GitHub remains the lifecycle source."] : []),
       ...(reporter.status === "not_expected" ? ["Reporter is not expected for this run state; GitHub remains the lifecycle source."] : []),
+      ...(reporter.status === "not_requested" ? ["Reporter was intentionally not queried; this is a GitHub-only, low-cost read."] : []),
       ...(reporter.status === "expired" ? ["Reporter logs expired; historical lifecycle evidence remains in GitHub where available."] : []),
       ...(reporter.status === "available" && reporter.events.length === 0
         ? ["Reporter query succeeded, but no trusted event was observed for this run attempt; this is an observation gap, not a Worker failure."]
