@@ -52,7 +52,7 @@ export default function Overview() {
   const projectsReady = governance.data?.github.projects.status === "connected";
   const projects = projectsReady ? governance.data!.github.projects.items : [];
   const activeProject = projects.find((project) => !project.closed) ?? projects[0] ?? null;
-  const failedBuilds = attention.filter((entry) => entry.category === "build").length;
+  const failedBuilds = attention.filter((entry) => entry.category === "build" && entry.severity === "failure").length;
   const buildsWithRuns = snapshot.repositories.filter((repo) => Boolean(repo.latestWorkflow)).length;
   const passingBuilds = snapshot.repositories.filter((repo) =>
     repo.latestWorkflow?.status === "completed" && repo.latestWorkflow.conclusion === "success",

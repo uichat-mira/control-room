@@ -71,7 +71,7 @@ export default function Wall() {
             ? <CheckCircle2 className="status-icon ok" size={20} />
             : <AlertTriangle className="status-icon warn" size={20} />}
           <span>
-            <strong>{view.status === "connected" ? "SYSTEM OPERATIONAL" : "ATTENTION REQUIRED"}</strong>
+            <strong>{view.status === "connected" ? "SOURCES CONNECTED" : "SOURCE COVERAGE PARTIAL"}</strong>
             <small>{view.organization.login} · {formatTime(view.generatedAt)}</small>
           </span>
         </a>
@@ -80,7 +80,7 @@ export default function Wall() {
       <section className="source-strip source-strip-icons">
         <span><GitBranch size={13} /> GitHub · {view.sources.github}</span>
         <span><Cloud size={13} /> Cloudflare · {cloudflareLabel(view.sources.cloudflare)}</span>
-        <span><Radio size={13} /> Runtime · live probes</span>
+        <span><Radio size={13} /> HTTP · latest probe samples</span>
         <small>refresh 60s</small>
       </section>
 

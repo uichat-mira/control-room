@@ -334,8 +334,10 @@
     gap: 5px;
   }
 
-  .traffic-panel {
-    grid-template-columns: 1fr;
+  .traffic-panel,
+  [data-wall="true"] .traffic-panel {
+    /* The wall-specific desktop grid is more specific: override it on mobile. */
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .traffic-summary {
