@@ -1,4 +1,4 @@
-import { buildIsFailure } from "./data.ts";
+import { buildState } from "./engineering-facts.ts";
 import type { OrganizationRepository, ServiceProbe } from "./shared.ts";
 import type { GovernanceRepository } from "./data.ts";
 import type { FactoryFeed, FactoryFeedItem } from "./factory-feed.ts";
@@ -35,14 +35,17 @@ export function collectAttention(
     });
   }
   for (const repo of repositories) {
-    if (!repo.latestWorkflow?.conclusion || !buildIsFailure(repo.latestWorkflow)) continue;
-    const run = repo.latestWorkflow!;
+    const run = repo.latestWorkflow;
+    const state = buildState(run);
+    if (!run || (state !== "failed" && state !== "action")) continue;
     entries.push({
       key: "build:" + repo.fullName,
       category: "build",
-      severity: "failure",
+      severity: state === "failed" ? "failure" : "warning",
       name: repo.name,
-      explanation: "最新默认分支构建 " + (run.conclusion ?? "未知结果") + " · " + run.name,
+      explanation: state === "action"
+        ? "最新默认分支构建需要人工操作 · " + run.name
+        : "最新默认分支构建 " + run.conclusion + " · " + run.name,
       href: run.htmlUrl,
       observedAt: run.updatedAt,
     });

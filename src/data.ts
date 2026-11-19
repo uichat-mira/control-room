@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { buildState } from "./engineering-facts.ts";
 import type {
   CloudflarePageDeployment,
   CloudflareSourceStatus,
@@ -118,24 +119,22 @@ export const workflowText = (run: RepositoryWorkflow | null) => {
   if (!run) return "No runs";
   if (run.status !== "completed") return run.status === "in_progress" ? "Running" : "Queued";
   if (run.conclusion === "success") return "Passed";
+  if (run.conclusion === "action_required") return "Needs action";
   if (run.conclusion === "cancelled") return "Cancelled";
   if (run.conclusion === "skipped" || run.conclusion === "neutral") return "Neutral";
-  return run.conclusion ? run.conclusion.replaceAll("_", " ") : "Completed";
+  return run.conclusion ? run.conclusion.replaceAll("_", " ") : "Unknown";
 };
 
 export const workflowTone = (run: RepositoryWorkflow | null) => {
-  if (!run) return "muted";
-  if (run.status !== "completed") return "running";
-  if (run.conclusion === "success") return "success";
-  if (run.conclusion === "cancelled" || run.conclusion === "skipped" || run.conclusion === "neutral") {
-    return "muted";
+  // Keep the system wall in lockstep with the Engineering and Overview
+  // GitHub-run classification: missing data and action_required are not failures.
+  switch (buildState(run)) {
+    case "passed": return "success";
+    case "running": return "running";
+    case "failed": return "failure";
+    case "action": return "review";
+    default: return "muted";
   }
-  return "failure";
-};
-
-export const buildIsFailure = (run: RepositoryWorkflow | null) => {
-  if (!run || run.status !== "completed") return false;
-  return !["success", "cancelled", "skipped", "neutral"].includes(run.conclusion ?? "");
 };
 
 export const cloudflareLabel = (status: CloudflareSourceStatus | undefined) => {

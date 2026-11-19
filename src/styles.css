@@ -353,6 +353,8 @@ a.cf-row:hover { background: var(--hover); }
 .service-state.online i { background: var(--ok); }
 .status-pill.running { color: var(--warn); }
 .status-pill.running::before { background: var(--warn); }
+.status-pill.review { color: var(--warn); }
+.status-pill.review::before { background: var(--warn); }
 .status-pill.failure,
 .service-state.offline { color: var(--danger); }
 .status-pill.failure::before,
