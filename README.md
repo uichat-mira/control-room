@@ -40,7 +40,8 @@ Control Room exposes a versioned, read-only, public-safe API. It only projects p
 - `GET /api/v1/analytics` — Workers last-24h requests and errors
 - `GET /api/v1/governance` — Issues / PR / branch protection / rulesets / Projects
 - `GET /api/v1/projects` — public GitHub Projects
-- `GET /api/v1/factory/run?repository=...&runId=...` — sanitized real External Worker lifecycle projection
+- `GET /api/v1/factory/runs` — bounded, cached real External Worker discovery across public organization repositories (GitHub Actions only; no Workers Logs scan)
+- `GET /api/v1/factory/run?repository=...&runId=...` — sanitized real External Worker lifecycle projection; `includeReporter=false` avoids Workers Logs for GitHub-only details
 - `GET /openapi.json` — OpenAPI 3.1 contract
 - `GET /docs` — human-readable API/MCP documentation
 
@@ -116,7 +117,8 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 - `/runtime` — live service probes, Workers, Pages, and 24-hour traffic/error analytics
 - `/governance` — Issues, pull requests, default-branch protection, rulesets, and public Projects
 - `/wall` — large-screen operations view; forced dark theme and 60-second refresh
-- `/factory` — Factory TV design/demo wall; synthetic workstations stay explicitly labelled
+- `/factory` — real GitHub External Worker status wall; discovers recent non-skipped Runs and refreshes every 60 seconds without Workers Logs queries
+- `/factory?mode=demo` — clearly labelled historical synthetic Factory TV design fixture
 - `/factory?mode=real&repository=uichat-mira/<repo>&runId=<run>` — real, sanitized External Worker lifecycle projection
 - `/factory/demo-01` (and `demo-02`, `demo-03`) — single-station timeline demo using explicitly synthetic events
 - `/factory/broadcast` — fact-based industrial satire / broadcast copy demo
@@ -124,7 +126,7 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 
 The UI is intentionally split by operational question rather than by raw data table. Engineering, Runtime, and Governance use focused `/api/v1/*` reads; only Overview and Wall use the cross-domain summary.
 
-**Factory TV scope:** Factory TV is an independent presentation mode beside Wall, not a fifth business domain. Demo stations remain synthetic and clearly labelled. Real mode consumes the public-safe server projection only; it does not expose raw Worker logs, Cloudflare credentials, prompts, model output, or an invented heartbeat. GitHub remains authoritative for lifecycle evidence and 号脉 only refines trusted terminal stage events when available.
+**Factory TV scope:** Factory TV is an independent presentation mode beside Wall, not a fifth business domain. The default wall discovers real public Worker Runs through a bounded GitHub-only read (24-repository cap, 14-day window, 12 displayed Runs); a partial source or no Runs is explicit. Demo stations require `?mode=demo`. The selected workstation is GitHub-only; optional Reporter inspection is an explicit detail action, not part of wall polling. No raw Worker logs, Cloudflare credentials, prompts, model output, or invented heartbeat reach the browser. GitHub remains authoritative for lifecycle evidence.
 
 ## Local development
 

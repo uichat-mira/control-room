@@ -458,3 +458,19 @@
 }
 .factory-live-evidence a { color: var(--ft-text); }
 .factory-live-evidence a:hover { color: var(--ft-amber); }
+.factory-stats strong.factory-feed-source { font-size: 23px; line-height: 1.35; letter-spacing: 0; }
+.factory-feed-alert {
+  color: var(--ft-amber);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--ft-amber);
+  background: var(--ft-panel);
+  overflow-wrap: anywhere;
+}
+.factory-station-name,
+.factory-station-sub,
+.factory-timeline-title small,
+.factory-event strong,
+.factory-event p { overflow-wrap: anywhere; }

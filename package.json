@@ -12,7 +12,7 @@
     "test:github-overview": "node --test tests/github-overview.test.ts",
     "deploy": "npm run build && wrangler deploy",
     "test:ai-review:integration": "npm run build && node --test tests/worker-ai-review-external.integration.test.ts",
-    "test:factory": "node --test tests/factory-read-model.test.ts",
+    "test:factory": "node --test tests/factory-*.test.ts",
     "check": "npm run typecheck && npm run test:factory && npm run test:github-snapshot && npm run build",
     "test:github-snapshot": "node --test tests/github-snapshot.test.ts"
   },
