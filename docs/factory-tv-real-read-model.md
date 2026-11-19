@@ -18,7 +18,11 @@ OPS-032 adds a public-safe, read-only projection for one real Mira External Work
 
 ## Real mode
 
-Factory TV remains an explicit design fixture by default.
+Factory TV now defaults to a real, GitHub-only organization Run feed at `/factory`. The old synthetic V1 wall remains explicitly available at `/factory?mode=demo`; historic `/factory/demo-*` links are demos.
+
+The wall calls `GET /api/v1/factory/runs` every 60 seconds while visible. The server lists up to 24 current public organization repositories, checks their default branches for the Worker caller in one GitHub GraphQL request (bounded REST fallback), then fetches up to 20 latest External Worker workflow runs from each caller. It excludes skipped and foreign workflow references and shows up to 12 Runs from the last 14 days (active first). The feed has a shared edge cache (up to 120 seconds); partial repository failures are explicitly reported. It never calls Workers Observability.
+
+Selecting a wall station calls `/api/v1/factory/run?...&includeReporter=false` to view GitHub Jobs/Artifacts/PR evidence without Workers Logs. The explicit detail link opts into the existing trusted Reporter read. This avoids repeating costly Cloudflare scans every time the wall refreshes.
 
 To inspect a real run:
 
@@ -76,6 +80,6 @@ Reporter retention currently follows the documented seven-day Workers Logs windo
 
 ## Demo boundary
 
-The existing synthetic Factory TV stations remain available at `/factory`.
+The synthetic Factory TV stations remain available at `/factory?mode=demo`; `/factory` is the real GitHub status wall.
 
 Synthetic stations are explicitly marked `DESIGN DEMO · NON-LIVE`. They must never be presented as real Worker activity.

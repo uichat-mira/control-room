@@ -9,6 +9,7 @@ import {
 import { openApiDocument } from "./openapi";
 import { getServiceSnapshot } from "./services";
 import { getFactoryRunProjection, type FactoryRunProjection } from "./factory-read-model";
+import { getFactoryFeed, type FactoryFeed } from "./factory-feed";
 import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
 
 const AUTH_GITHUB_TTL_SECONDS = 15 * 60;
@@ -84,11 +85,12 @@ function governanceCacheKeys(request: Request, env: Env) {
   };
 }
 
-function factoryCacheKey(request: Request, repository: string, runId: number) {
+function factoryCacheKey(request: Request, repository: string, runId: number, includeReporter: boolean) {
   const url = new URL(request.url);
   const key = new URL("/api/__factory-v1", url.origin);
   key.searchParams.set("repository", repository);
   key.searchParams.set("runId", String(runId));
+  key.searchParams.set("includeReporter", String(includeReporter));
   return new Request(key, { method: "GET" });
 }
 
@@ -106,6 +108,7 @@ async function cachedFactoryRun(
   env: Env,
   repository: string,
   runId: number,
+  includeReporter: boolean,
 ): Promise<FactoryRunProjection> {
   let edgeCache: Cache | null = null;
   let key: Request | null = null;
@@ -113,14 +116,14 @@ async function cachedFactoryRun(
   try {
     const workerCaches = caches as CacheStorage & { default: Cache };
     edgeCache = workerCaches.default;
-    key = factoryCacheKey(request, repository, runId);
+    key = factoryCacheKey(request, repository, runId, includeReporter);
     const cached = await edgeCache.match(key);
     if (cached) return (await cached.json()) as FactoryRunProjection;
   } catch {
     // Cache is an optimization. Upstream lifecycle reads still execute exactly once.
   }
 
-  const next = await getFactoryRunProjection(env, env, repository, runId);
+  const next = await getFactoryRunProjection(env, env, repository, runId, Date.now(), includeReporter);
 
   if (edgeCache && key) {
     try {
@@ -131,6 +134,30 @@ async function cachedFactoryRun(
   }
 
   return next;
+}
+
+async function cachedFactoryFeed(request: Request, env: Env): Promise<FactoryFeed> {
+  // A full organization scan is a bounded, shared snapshot, never one scan per viewer.
+  const origin = new URL(request.url).origin;
+  const key = new Request(origin + "/api/__factory-feed-v1-" + (env.GITHUB_READ_TOKEN ? "auth" : "anon"));
+  let edgeCache: Cache | null = null;
+  try {
+    edgeCache = (caches as CacheStorage & { default: Cache }).default;
+    const hit = await edgeCache.match(key);
+    if (hit) return await hit.json() as FactoryFeed;
+  } catch {
+    edgeCache = null;
+  }
+
+  const feed = await getFactoryFeed(env);
+  if (edgeCache) {
+    try {
+      await edgeCache.put(key, cacheResponse(feed, feed.status === "connected" ? 120 : 30));
+    } catch {
+      // The upstream read must not be repeated when cache storage is unavailable.
+    }
+  }
+  return feed;
 }
 
 function cloudflareCacheKey(request: Request, env: Env) {
@@ -352,6 +379,7 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
         "/api/v1/analytics",
         "/api/v1/governance",
         "/api/v1/projects",
+        "/api/v1/factory/runs",
         "/api/v1/factory/run?repository=uichat-mira/mira-mobile&runId=...",
       ],
     });
@@ -419,6 +447,20 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
     }));
   }
 
+  if (pathname === "/api/v1/factory/runs") {
+    try {
+      const feed = await cachedFactoryFeed(request, env);
+      return publicApiJson(feed, {
+        headers: { "cache-control": "public, max-age=30, s-maxage=60" },
+      });
+    } catch {
+      return publicApiJson({
+        apiVersion: "v1", status: "unavailable", source: "github-actions",
+        error: "Worker discovery temporarily unavailable",
+      }, { status: 503, headers: { "cache-control": "no-store" } });
+    }
+  }
+
   if (pathname === "/api/v1/factory/run") {
     const url = new URL(request.url);
     const repository = url.searchParams.get("repository");
@@ -433,11 +475,12 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
     }
 
     try {
-      const projection = await cachedFactoryRun(request, env, repository, runId);
+      const includeReporter = url.searchParams.get("includeReporter") !== "false";
+      const projection = await cachedFactoryRun(request, env, repository, runId, includeReporter);
       return publicApiJson(v1Envelope(projection), {
         headers: {
           "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
-          "x-mira-factory-source": "github+trusted-reporter",
+          "x-mira-factory-source": includeReporter ? "github+trusted-reporter" : "github-only",
         },
       });
     } catch (error) {

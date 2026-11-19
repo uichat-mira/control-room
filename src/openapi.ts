@@ -103,6 +103,14 @@ export function openApiDocument(origin: string) {
           responses: { "200": { description: "Governance snapshot" } },
         },
       },
+      "/api/v1/factory/runs": {
+        get: {
+          tags: ["runtime"],
+          summary: "Recent real External Worker runs across public organization repositories",
+          description: "GitHub Actions only; bounded, cached discovery. Excludes skipped callers and never queries Cloudflare logs.",
+          responses: { "200": { description: "Real-run feed and source coverage" }, "503": { description: "GitHub discovery unavailable" } },
+        },
+      },
       "/api/v1/factory/run": {
         get: {
           tags: ["runtime"],
@@ -121,6 +129,13 @@ export function openApiDocument(origin: string) {
               in: "query",
               required: true,
               schema: { type: "integer", minimum: 1 },
+            },
+            {
+              name: "includeReporter",
+              in: "query",
+              required: false,
+              schema: { type: "boolean", default: true },
+              description: "Set false for GitHub-only inspection without a Cloudflare Workers Logs scan.",
             },
           ],
           responses: {
