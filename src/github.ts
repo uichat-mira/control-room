@@ -37,6 +37,7 @@ interface GitHubOrg {
 }
 
 interface GitHubRepo {
+  node_id: string;
   name: string;
   full_name: string;
   html_url: string;
@@ -61,11 +62,20 @@ interface GitHubWorkflowRun {
   updated_at: string;
 }
 
-interface GitHubRelease {
-  tag_name: string;
+interface GitHubReleaseNode {
+  tagName: string;
   name: string | null;
-  html_url: string;
-  published_at: string | null;
+  url: string;
+  publishedAt: string | null;
+}
+
+interface GitHubRepositoryNode {
+  name: string;
+  latestRelease: GitHubReleaseNode | null;
+}
+
+interface GitHubLatestReleasesGraphQL {
+  nodes: Array<GitHubRepositoryNode | null>;
 }
 
 interface GitHubSearchResult {
@@ -151,45 +161,95 @@ async function optional<T>(env: GitHubEnv, path: string): Promise<T | null> {
   return response.json() as Promise<T>;
 }
 
-async function activity(env: GitHubEnv, repo: GitHubRepo): Promise<{
-  latestWorkflow: RepositoryWorkflow | null;
-  latestRelease: RepositoryRelease | null;
-}> {
-  if (repo.name === ".github") {
-    return { latestWorkflow: null, latestRelease: null };
-  }
+async function latestWorkflow(
+  env: GitHubEnv,
+  repo: GitHubRepo,
+): Promise<RepositoryWorkflow | null> {
+  if (repo.name === ".github") return null;
 
   const repoName = encodeURIComponent(repo.name);
   const branch = encodeURIComponent(repo.default_branch);
-  const [workflows, release] = await Promise.all([
-    optional<{ workflow_runs: GitHubWorkflowRun[] }>(
-      env,
-      `/repos/${ORG}/${repoName}/actions/runs?branch=${branch}&per_page=1`,
-    ),
-    optional<GitHubRelease>(env, `/repos/${ORG}/${repoName}/releases/latest`),
-  ]);
-
+  const workflows = await optional<{ workflow_runs: GitHubWorkflowRun[] }>(
+    env,
+    `/repos/${ORG}/${repoName}/actions/runs?branch=${branch}&per_page=1`,
+  );
   const run = workflows?.workflow_runs[0] ?? null;
-  return {
-    latestWorkflow: run
-      ? {
-          name: run.name,
-          status: run.status,
-          conclusion: run.conclusion,
-          htmlUrl: run.html_url,
-          createdAt: run.created_at,
-          updatedAt: run.updated_at,
+  return run
+    ? {
+        name: run.name,
+        status: run.status,
+        conclusion: run.conclusion,
+        htmlUrl: run.html_url,
+        createdAt: run.created_at,
+        updatedAt: run.updated_at,
+      }
+    : null;
+}
+
+async function latestReleases(
+  env: GitHubEnv,
+  repositories: GitHubRepo[],
+): Promise<{ releases: Map<string, RepositoryRelease>; error?: string }> {
+  if (repositories.length === 0) return { releases: new Map() };
+  if (!env.GITHUB_READ_TOKEN) {
+    return {
+      releases: new Map(),
+      error: "Authenticated GitHub token required for bounded latest-release enrichment",
+    };
+  }
+
+  const query = `
+    query MiraLatestReleases($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on Repository {
+          name
+          latestRelease {
+            tagName
+            name
+            url
+            publishedAt
+          }
         }
-      : null,
-    latestRelease: release
-      ? {
-          tagName: release.tag_name,
-          name: release.name,
-          htmlUrl: release.html_url,
-          publishedAt: release.published_at,
-        }
-      : null,
-  };
+      }
+    }
+  `;
+
+  try {
+    const response = await fetch(GRAPHQL, {
+      method: "POST",
+      headers: {
+        ...headers(env),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        query,
+        variables: { ids: repositories.map((repo) => repo.node_id) },
+      }),
+    });
+    if (!response.ok) throw new Error(`GitHub GraphQL ${response.status}`);
+
+    const payload = (await response.json()) as GitHubGraphQLResponse<GitHubLatestReleasesGraphQL>;
+    if (payload.errors?.length) {
+      throw new Error(payload.errors.map((error) => error.message).join(" · "));
+    }
+
+    const releases = new Map<string, RepositoryRelease>();
+    for (const repository of payload.data?.nodes ?? []) {
+      if (!repository?.latestRelease) continue;
+      releases.set(repository.name, {
+        tagName: repository.latestRelease.tagName,
+        name: repository.latestRelease.name,
+        htmlUrl: repository.latestRelease.url,
+        publishedAt: repository.latestRelease.publishedAt,
+      });
+    }
+    return { releases };
+  } catch (error) {
+    return {
+      releases: new Map(),
+      error: error instanceof Error ? error.message : "Latest release enrichment unavailable",
+    };
+  }
 }
 
 async function governance(env: GitHubEnv, repo: GitHubRepo): Promise<RepositoryGovernance> {
@@ -298,10 +358,13 @@ export async function getGitHubSnapshot(env: GitHubEnv = {}): Promise<GitHubSnap
       request<GitHubOrg>(env, `/orgs/${ORG}`),
       request<GitHubRepo[]>(env, `/orgs/${ORG}/repos?type=public&sort=updated&direction=desc&per_page=100`),
     ]);
-    const activities = await Promise.all(repositories.map((repo) => activity(env, repo)));
+    const [workflows, releaseResult] = await Promise.all([
+      Promise.all(repositories.map((repo) => latestWorkflow(env, repo))),
+      latestReleases(env, repositories),
+    ]);
 
     return {
-      status: "connected",
+      status: releaseResult.error ? "degraded" : "connected",
       authenticated,
       github: {
         authenticated,
@@ -335,9 +398,10 @@ export async function getGitHubSnapshot(env: GitHubEnv = {}): Promise<GitHubSnap
         updatedAt: repo.updated_at,
         openIssuesCount: repo.open_issues_count,
         stars: repo.stargazers_count,
-        latestWorkflow: activities[index]?.latestWorkflow ?? null,
-        latestRelease: activities[index]?.latestRelease ?? null,
+        latestWorkflow: workflows[index] ?? null,
+        latestRelease: releaseResult.releases.get(repo.name) ?? null,
       })),
+      ...(releaseResult.error ? { error: releaseResult.error } : {}),
     };
   } catch (error) {
     return {
