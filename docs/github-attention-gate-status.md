@@ -26,7 +26,8 @@ A Run applies to the current target only when all of these match:
   one of the collected `dev` / `test` / `prod` channels);
 - current branch `head_sha`;
 - workflow `path` identity;
-- `run_attempt` (the highest attempt for the same SHA wins).
+- `run_attempt` (ordered within the same Run ID; a newer Run's attempt 1
+  supersedes an older Run's attempt 2 when its updated time is later).
 
 `issue_comment` Runs are retained as raw archive evidence but are **never** part
 of the target Gate. This is the same signal that made `per_page=1` misread an

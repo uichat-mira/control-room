@@ -242,7 +242,11 @@ function runTime(run: PilotWorkflowRunFact): number {
 }
 
 function newestFirst(a: PilotWorkflowRunFact, b: PilotWorkflowRunFact): number {
-  return b.attempt - a.attempt || runTime(b) - runTime(a) || b.id - a.id;
+  // run_attempt is scoped to one Run ID. A newer Run with attempt=1 can
+  // supersede an older Run with attempt=2 on the same branch and SHA.
+  // updated_at is the observation of the last execution/re-run; Run ID and
+  // attempt provide a stable tie-break without treating attempt as global.
+  return runTime(b) - runTime(a) || b.id - a.id || b.attempt - a.attempt;
 }
 
 // An issue_comment Run is an External Worker dispatch/skip signal, never a
@@ -353,11 +357,9 @@ function assessWorkflow(
 }
 
 function newestFirstRun(runs: PilotWorkflowRunFact[]): GateRunEvidence | null {
-  // Archive evidence follows the newest observed timestamp. Applicable Gate
-  // selection instead prefers the highest run attempt so a same-SHA retry wins.
-  const latest = [...runs].sort(
-    (a, b) => runTime(b) - runTime(a) || b.attempt - a.attempt || b.id - a.id,
-  )[0];
+  // Archive and applicable Gate views share the same chronology; they differ
+  // only in target-SHA/branch/event eligibility, not cross-Run attempt order.
+  const latest = [...runs].sort(newestFirst)[0];
   return latest ? runEvidence(latest) : null;
 }
 

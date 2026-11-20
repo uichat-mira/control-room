@@ -333,6 +333,112 @@ test("same-SHA rerun recovery clears the old failed attempt and keeps it as arch
   assert.ok(projected.warnings.some((warning) => /production SHA or smoke/i.test(warning)));
 });
 
+test("a newer Run attempt=1 supersedes an older Run attempt=2 on the same target", () => {
+  const target = sha("prod");
+  const oldFailedRerun = run(100, "deploy.yml", {
+    headSha: target,
+    attempt: 2,
+    conclusion: "failure",
+    updatedAt: "2026-11-20T01:00:00Z",
+  });
+  const newerSuccessfulRun = run(200, "deploy.yml", {
+    headSha: target,
+    attempt: 1,
+    conclusion: "success",
+    updatedAt: "2026-11-20T02:00:00Z",
+  });
+  const snapshot = qualifyGitHubGates(
+    facts([
+      repository("control-room", {
+        workflows: [workflow("deploy.yml", [oldFailedRerun, newerSuccessfulRun])],
+      }),
+    ]),
+  );
+  const controlRoom = snapshot.repositories[0];
+  assert.equal(controlRoom.gate.workflows[0].applicableRun?.id, 200);
+  assert.equal(controlRoom.gate.workflows[0].latestRun?.id, 200);
+  assert.equal(controlRoom.gate.outcome, "success");
+  assert.equal(controlRoom.gate.workflows[0].recovered, true);
+  assert.equal(controlRoom.gate.workflows[0].earlierFailedAttempts, 1);
+  assert.equal(controlRoom.release.releaseRun?.id, 200);
+  assert.equal(controlRoom.release.releaseStatus, "succeeded");
+  assert.equal(controlRoom.release.releaseRecovered, true);
+  assert.equal(controlRoom.release.production.status, "unverified");
+  assert.equal(
+    releaseCandidates(controlRoom.candidates).filter(
+      (candidate) => candidate.classification === "attention",
+    ).length,
+    0,
+  );
+});
+
+test("a newer failed Run is not masked by a success on an older Run with a higher attempt", () => {
+  const target = sha("prod");
+  const snapshot = qualifyGitHubGates(
+    facts([
+      repository("control-room", {
+        workflows: [
+          workflow("deploy.yml", [
+            run(100, "deploy.yml", {
+              headSha: target,
+              attempt: 3,
+              conclusion: "success",
+              updatedAt: "2026-11-20T01:00:00Z",
+            }),
+            run(200, "deploy.yml", {
+              headSha: target,
+              attempt: 1,
+              conclusion: "failure",
+              updatedAt: "2026-11-20T02:00:00Z",
+            }),
+          ]),
+        ],
+      }),
+    ]),
+  );
+  const controlRoom = snapshot.repositories[0];
+  assert.equal(controlRoom.gate.workflows[0].applicableRun?.id, 200);
+  assert.equal(controlRoom.gate.outcome, "failure");
+  assert.equal(controlRoom.release.releaseRun?.id, 200);
+  assert.equal(controlRoom.release.releaseStatus, "failed");
+  assert.ok(
+    releaseCandidates(controlRoom.candidates).some(
+      (candidate) => candidate.classification === "attention" && candidate.priority === "P1",
+    ),
+  );
+});
+
+test("attempt remains the tie-breaker for multiple attempts of the same Run", () => {
+  const target = sha("prod");
+  const observedAt = "2026-11-20T02:00:00Z";
+  const snapshot = qualifyGitHubGates(
+    facts([
+      repository("control-room", {
+        workflows: [
+          workflow("deploy.yml", [
+            run(100, "deploy.yml", {
+              headSha: target,
+              attempt: 1,
+              conclusion: "failure",
+              updatedAt: observedAt,
+            }),
+            run(100, "deploy.yml", {
+              headSha: target,
+              attempt: 2,
+              conclusion: "success",
+              updatedAt: observedAt,
+            }),
+          ]),
+        ],
+      }),
+    ]),
+  );
+  const controlRoom = snapshot.repositories[0];
+  assert.equal(controlRoom.gate.workflows[0].applicableRun?.attempt, 2);
+  assert.equal(controlRoom.gate.outcome, "success");
+  assert.equal(controlRoom.release.releaseStatus, "succeeded");
+});
+
 test("an old-SHA failure stays historical and does not describe the current target", () => {
   const current = sha("prod");
   const projected = qualifyGitHubGates(
