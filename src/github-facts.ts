@@ -293,7 +293,7 @@ export interface CollectGitHubFactsOptions {
   now?: number;
 }
 
-interface MeterState {
+export interface MeterState {
   used: number;
   retries: number;
   notModified: number;
@@ -317,7 +317,7 @@ interface BranchPayload {
   protected: boolean | null;
 }
 
-interface WorkflowPayload {
+export interface WorkflowPayload {
   runs: PilotWorkflowRunFact[];
   totalCount: number | null;
 }
@@ -326,12 +326,12 @@ interface PullRequestPayload {
   items: PilotPullRequestFact[];
 }
 
-interface ParsedValue<T> {
+export interface ParsedValue<T> {
   value: T;
   truncated: boolean;
 }
 
-interface PreviousEntry<T> {
+export interface PreviousEntry<T> {
   meta: FactQueryMeta;
   value: T;
 }
@@ -410,7 +410,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function skippedMeta(
+export function skippedMeta(
   path: string,
   now: number,
   reason: "budget_exhausted" | "upstream_rate_limited",
@@ -434,7 +434,7 @@ function skippedMeta(
   };
 }
 
-function failedMeta(
+export function failedMeta(
   path: string,
   now: number,
   status: Exclude<FactQueryStatus, "ok" | "not_modified" | "skipped">,
@@ -456,7 +456,7 @@ function failedMeta(
   };
 }
 
-async function fetchFact<T>(
+export async function fetchFact<T>(
   env: GitHubEnv,
   path: string,
   meter: MeterState,
@@ -672,7 +672,7 @@ function optionalString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-function parseWorkflowRuns(payload: unknown): ParsedValue<WorkflowPayload> | null {
+export function parseWorkflowRuns(payload: unknown): ParsedValue<WorkflowPayload> | null {
   if (!payload || typeof payload !== "object") return null;
   const row = payload as { workflow_runs?: unknown; total_count?: unknown };
   if (!Array.isArray(row.workflow_runs)) return null;
@@ -762,7 +762,7 @@ function parsePullRequests(payload: unknown): ParsedValue<PullRequestPayload> | 
   };
 }
 
-function stateFromMeta(meta: FactQueryMeta): FactSourceState {
+export function stateFromMeta(meta: FactQueryMeta): FactSourceState {
   switch (meta.status) {
     case "ok":
     case "not_modified":

@@ -322,13 +322,22 @@ function selectWorkflowRuns(
     .sort(newestFirst);
 }
 
-function assessWorkflow(
+// A pull-request head is not a branch channel. Its workflow runs are keyed by
+// head SHA, while the required-check evidence belongs to the PR base branch.
+function selectWorkflowRunsForSha(
   workflow: PilotWorkflowFact,
-  branch: string | null,
-  sha: string | null,
+  sha: string,
+): PilotWorkflowRunFact[] {
+  return workflow.runs
+    .filter((run) => run.headSha === sha && isGateEligible(run))
+    .sort(newestFirst);
+}
+
+function assessWorkflowRuns(
+  workflow: PilotWorkflowFact,
+  applicable: PilotWorkflowRunFact[],
   required: RequiredState,
 ): GateWorkflowAssessment {
-  const applicable = selectWorkflowRuns(workflow, branch, sha);
   const latest = applicable[0] ?? null;
   const earlierFailedAttempts = applicable.filter(
     (run) =>
@@ -354,6 +363,41 @@ function assessWorkflow(
     reason: outcomeReason(outcome, workflow.query.truncated, workflow.state === "observed"),
     truncated: workflow.query.truncated,
   };
+}
+
+function assessWorkflow(
+  workflow: PilotWorkflowFact,
+  branch: string | null,
+  sha: string | null,
+  required: RequiredState,
+): GateWorkflowAssessment {
+  return assessWorkflowRuns(
+    workflow,
+    selectWorkflowRuns(workflow, branch, sha),
+    required,
+  );
+}
+
+/**
+ * OPS-036 reuses this exact OPS-035 workflow assessment for a pull-request head
+ * SHA. It does not reimplement required-check applicability: callers supply the
+ * same RequiredCheckEvidence and receive the same GateWorkflowAssessment.
+ */
+export function assessWorkflowsForSha(
+  workflows: PilotWorkflowFact[],
+  sha: string | null,
+  requiredFiles: Set<string> | null,
+): GateWorkflowAssessment[] {
+  if (!sha) return workflows.map((workflow) =>
+    assessWorkflowRuns(workflow, [], requiredStateFor(workflow.file, requiredFiles)),
+  );
+  return workflows.map((workflow) =>
+    assessWorkflowRuns(
+      workflow,
+      selectWorkflowRunsForSha(workflow, sha),
+      requiredStateFor(workflow.file, requiredFiles),
+    ),
+  );
 }
 
 function newestFirstRun(runs: PilotWorkflowRunFact[]): GateRunEvidence | null {
@@ -384,7 +428,7 @@ function outcomeMeaning(outcome: GateRunOutcome): RepositoryGateAssessment["outc
 }
 
 function requiredFilesFor(
-  options: GateQualificationOptions,
+  options: { requiredChecks?: readonly RequiredCheckEvidence[] },
   repository: string,
   branch: string | null,
 ): Set<string> | null {
@@ -395,6 +439,18 @@ function requiredFilesFor(
   );
   if (matches.length === 0) return null;
   return new Set(matches.flatMap((entry) => [...entry.workflowFiles]));
+}
+
+/**
+ * Exposes the OPS-035 required-workflow resolution so OPS-036 can reuse it for
+ * a PR base branch instead of maintaining a second required-check rule set.
+ */
+export function requiredWorkflowFilesFor(
+  repository: string,
+  branch: string | null,
+  requiredChecks: readonly RequiredCheckEvidence[] | undefined,
+): Set<string> | null {
+  return requiredFilesFor({ requiredChecks }, repository, branch);
 }
 
 function requiredStateFor(file: string, requiredFiles: Set<string> | null): RequiredState {

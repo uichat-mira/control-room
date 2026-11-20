@@ -11,6 +11,7 @@ import { getServiceSnapshot } from "./services";
 import { getFactoryRunProjection, type FactoryRunProjection } from "./factory-read-model";
 import { getFactoryFeed, type FactoryFeed } from "./factory-feed";
 import { handleGitHubFactsRequest, handleGitHubGateRequest } from "./github-facts-route";
+import { handleGitHubPullRequestRequest } from "./github-pr-route";
 import type { OrganizationSnapshot } from "./shared";
 
 const AUTH_GITHUB_TTL_SECONDS = 15 * 60;
@@ -364,6 +365,7 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
         "/api/v1/projects",
         "/api/v1/github/facts",
         "/api/v1/github/gates",
+        "/api/v1/github/pull?repository=uichat-mira/mira-desktop&number=404",
         "/api/v1/factory/runs",
         "/api/v1/factory/run?repository=uichat-mira/mira-mobile&runId=...",
       ],
@@ -490,6 +492,10 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
 
   if (pathname === "/api/v1/github/gates") {
     return handleGitHubGateRequest(request, env);
+  }
+
+  if (pathname === "/api/v1/github/pull") {
+    return handleGitHubPullRequestRequest(request, env);
   }
 
   if (pathname === "/api/v1/governance" || pathname === "/api/v1/projects") {
