@@ -95,6 +95,20 @@ export function openApiDocument(origin: string) {
           responses: { "200": { description: "24-hour requests and errors" } },
         },
       },
+      "/api/v1/github/facts": {
+        get: {
+          tags: ["github"],
+          summary: "Bounded six-repository GitHub raw fact collection",
+          description:
+            "Public-safe raw branch, workflow-run, and open-PR facts for the OPS-033 pilot allowlist. Includes coverage, freshness, rate-limit and per-round request-budget evidence. It does not decide attention or required Gate eligibility.",
+          responses: {
+            "200": {
+              description: "Pilot fact snapshot with explicit coverage gaps",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/GitHubFacts" } } },
+            },
+          },
+        },
+      },
       "/api/v1/governance": {
         get: {
           tags: ["governance"],
@@ -365,6 +379,49 @@ export function openApiDocument(origin: string) {
             services: { type: "array", items: { $ref: "#/components/schemas/Service" } },
             cloudflare: { type: "object", additionalProperties: true },
             deployedCommit: nullableString,
+            error: { type: "string" },
+          },
+        },
+        GitHubFacts: {
+          type: "object",
+          required: [
+            "apiVersion", "source", "generatedAt", "status", "authentication",
+            "freshness", "scope", "budget", "coverage", "rateLimit", "repositories",
+            "warnings",
+          ],
+          properties: {
+            apiVersion: { const: "v1" },
+            source: { const: "github-rest" },
+            generatedAt: { type: "string", format: "date-time" },
+            status: { enum: ["complete", "partial", "unavailable"] },
+            authentication: {
+              type: "object",
+              required: ["mode", "credentialPresent", "note"],
+              properties: {
+                mode: { enum: ["authenticated", "anonymous"] },
+                credentialPresent: { type: "boolean" },
+                note: { type: "string" },
+              },
+            },
+            freshness: {
+              type: "object",
+              required: ["observedAt", "maxAgeSeconds", "ageSeconds", "state"],
+              properties: {
+                observedAt: { type: "string", format: "date-time" },
+                maxAgeSeconds: { type: "integer", minimum: 1 },
+                ageSeconds: { type: "integer", minimum: 0 },
+                state: { enum: ["fresh", "stale"] },
+              },
+            },
+            scope: { type: "object", additionalProperties: true },
+            budget: { type: "object", additionalProperties: true },
+            coverage: { type: "object", additionalProperties: true },
+            rateLimit: { type: "object", additionalProperties: true },
+            repositories: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
+            warnings: { type: "array", items: { type: "string" } },
             error: { type: "string" },
           },
         },
