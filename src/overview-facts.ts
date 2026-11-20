@@ -1,4 +1,3 @@
-import { buildState } from "./engineering-facts.ts";
 import type { OrganizationRepository, ServiceProbe } from "./shared.ts";
 import type { GovernanceRepository } from "./data.ts";
 import type { FactoryFeed, FactoryFeedItem } from "./factory-feed.ts";
@@ -34,22 +33,11 @@ export function collectAttention(
       observedAt: null,
     });
   }
-  for (const repo of repositories) {
-    const run = repo.latestWorkflow;
-    const state = buildState(run);
-    if (!run || (state !== "failed" && state !== "action")) continue;
-    entries.push({
-      key: "build:" + repo.fullName,
-      category: "build",
-      severity: state === "failed" ? "failure" : "warning",
-      name: repo.name,
-      explanation: state === "action"
-        ? "最新默认分支构建需要人工操作 · " + run.name
-        : "最新默认分支构建 " + run.conclusion + " · " + run.name,
-      href: run.htmlUrl,
-      observedAt: run.updatedAt,
-    });
-  }
+  // `latestWorkflow` is the newest Actions Run, not a necessary Gate and not
+  // runtime health. An old or unrelated failed Run therefore stays an
+  // engineering archive fact (Engineering/Wall) and never becomes an
+  // "attention" incident here. OPS-035 Gate/Release eligibility is projected
+  // separately from branch + head SHA + workflow identity.
   // An unprotected branch is a review fact, not automatically a security incident.
   for (const repo of governance) {
     if (repo.governance.defaultBranchProtected !== false) continue;

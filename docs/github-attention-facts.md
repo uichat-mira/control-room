@@ -1,8 +1,11 @@
 # GitHub attention pilot facts (#105)
 
 > Status: implementation slice for OPS-034. This document describes a raw-fact
-> collector, not attention eligibility. Gate / PR / Worker judgment stays with
-> OPS-035–037, and the Overview redesign stays with OPS-038.
+> collector, not attention eligibility. OPS-035 Gate/Release qualification now
+> derives from this snapshot at `GET /api/v1/github/gates` with zero additional
+> GitHub reads (see [`github-attention-gate-status.md`](github-attention-gate-status.md));
+> PR / Worker judgment stays with OPS-036–037, and the Overview redesign stays
+> with OPS-038.
 
 ## Scope
 

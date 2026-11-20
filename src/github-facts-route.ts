@@ -3,6 +3,7 @@ import {
   decorateFactFreshness,
   type GitHubFactsSnapshot,
 } from "./github-facts.ts";
+import { qualifyGitHubGates } from "./github-gate-facts.ts";
 import type { GitHubEnv } from "./github.ts";
 
 const API_VERSION = "v1";
@@ -183,4 +184,31 @@ export async function handleGitHubFactsRequest(
       },
     },
   );
+}
+
+/**
+ * OPS-035 Gate/Release qualification. It derives from the exact same shared
+ * OPS-034 snapshot, so this route performs zero additional GitHub reads and
+ * inherits the isolate-local singleflight/cache/budget evidence.
+ */
+export async function handleGitHubGateRequest(
+  request: Request,
+  env: GitHubEnv,
+): Promise<Response> {
+  const { snapshot, cache } = await loadGitHubFactsSnapshot(request, env);
+  const facts = decorateFactFreshness(snapshot);
+  const qualification = qualifyGitHubGates(facts);
+  return publicApiJson(qualification, {
+    headers: {
+      "cache-control": "public, max-age=30, s-maxage=60, stale-while-revalidate=300",
+      "x-mira-api-version": API_VERSION,
+      "x-mira-github-gates-status": qualification.coverage.status,
+      "x-mira-github-gates-cache": cache,
+      "x-mira-github-gates-scope": "pilot-6",
+      "x-mira-github-gates-facts-status": facts.status,
+      "x-mira-github-gates-budget": `${facts.budget.usedRequests}/${facts.budget.maxRequests}`,
+      "x-mira-github-gates-required-by-github": qualification.requiredCheckEvidence,
+      "x-mira-github-gates-production-evidence": qualification.productionEvidence,
+    },
+  });
 }

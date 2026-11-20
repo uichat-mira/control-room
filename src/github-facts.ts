@@ -16,6 +16,10 @@ export interface PilotRepositoryTarget {
   name: string;
   channels: readonly string[];
   workflows: readonly PilotWorkflowTarget[];
+  // OPS-033 identifies the formal release entry per repository. `null` means
+  // the release entry (for example a tag-triggered workflow) is outside this
+  // bounded workflow slice, so release status stays unknown rather than green.
+  releaseWorkflow: string | null;
 }
 
 // OPS-033 pilot scope. Repository and workflow identities come from the
@@ -29,6 +33,8 @@ export const PILOT_REPOSITORIES: readonly PilotRepositoryTarget[] = [
       { file: "build-desktop.yml", label: "Build Desktop Apps" },
       { file: "branch-policy.yml", label: "Branch Policy" },
     ],
+    // Formal release is the stable v* tag workflow, outside this bounded slice.
+    releaseWorkflow: null,
   },
   {
     name: "mira-mobile",
@@ -37,6 +43,7 @@ export const PILOT_REPOSITORIES: readonly PilotRepositoryTarget[] = [
       { file: "mobile-ci.yml", label: "Mobile CI" },
       { file: "r2-release-truth.yml", label: "R2 Release Truth" },
     ],
+    releaseWorkflow: "mobile-ci.yml",
   },
   {
     name: "cloud-auth",
@@ -45,6 +52,7 @@ export const PILOT_REPOSITORIES: readonly PilotRepositoryTarget[] = [
       { file: "ci.yml", label: "Cloud Auth CI" },
       { file: "deploy-prod.yml", label: "Deploy Cloud Auth Production" },
     ],
+    releaseWorkflow: "deploy-prod.yml",
   },
   {
     name: "mira-cloud",
@@ -53,6 +61,7 @@ export const PILOT_REPOSITORIES: readonly PilotRepositoryTarget[] = [
       { file: "mira-gate.yml", label: "Mira Cloud Gate" },
       { file: "tencent-prod-deploy.yml", label: "Tencent Production Deploy" },
     ],
+    releaseWorkflow: "tencent-prod-deploy.yml",
   },
   {
     name: "cloud-pi",
@@ -61,11 +70,14 @@ export const PILOT_REPOSITORIES: readonly PilotRepositoryTarget[] = [
       { file: "validate.yml", label: "Validate" },
       { file: "validate-container.yml", label: "Validate Cloud Pi Container" },
     ],
+    // Manual direct deploy is outside this bounded slice.
+    releaseWorkflow: null,
   },
   {
     name: "control-room",
     channels: ["dev", "test", "prod"],
     workflows: [{ file: "deploy.yml", label: "Control Room CI / Deploy" }],
+    releaseWorkflow: "deploy.yml",
   },
 ];
 

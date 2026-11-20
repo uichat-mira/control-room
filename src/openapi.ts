@@ -109,6 +109,20 @@ export function openApiDocument(origin: string) {
           },
         },
       },
+      "/api/v1/github/gates": {
+        get: {
+          tags: ["github"],
+          summary: "Evidence-anchored Actions Gate and release qualification",
+          description:
+            "Read-only derivation over the exact shared /api/v1/github/facts snapshot. It evaluates applicability by repository, target branch, head SHA, workflow identity, event and run attempt. GitHub required-check configuration is unreadable in this boundary, so required_by_github stays unknown and a workflow outcome is a candidate, not an invented required Gate. Production SHA/smoke stays unverified unless explicit trusted evidence is supplied; a deployment workflow success is not production proof.",
+          responses: {
+            "200": {
+              description: "Gate/release qualification with explicit coverage gaps",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/GitHubGates" } } },
+            },
+          },
+        },
+      },
       "/api/v1/governance": {
         get: {
           tags: ["governance"],
@@ -423,6 +437,49 @@ export function openApiDocument(origin: string) {
             },
             warnings: { type: "array", items: { type: "string" } },
             error: { type: "string" },
+          },
+        },
+        GitHubGates: {
+          type: "object",
+          required: [
+            "apiVersion", "source", "generatedAt", "factsGeneratedAt", "factsStatus",
+            "requiredCheckEvidence", "productionEvidence", "coverage", "repositories",
+            "candidates", "warnings",
+          ],
+          properties: {
+            apiVersion: { const: "v1" },
+            source: { const: "github-facts-derivation" },
+            generatedAt: { type: "string", format: "date-time" },
+            factsGeneratedAt: { type: "string", format: "date-time" },
+            factsStatus: { enum: ["complete", "partial", "unavailable"] },
+            requiredCheckEvidence: { enum: ["unavailable", "supplied"] },
+            productionEvidence: { enum: ["unavailable", "supplied", "partial"] },
+            coverage: { type: "object", additionalProperties: true },
+            repositories: { type: "array", items: { type: "object", additionalProperties: true } },
+            candidates: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "id", "category", "classification", "priority", "who", "what",
+                  "whyNow", "nextStep", "evidence", "observedAt", "exitCondition",
+                ],
+                properties: {
+                  id: { type: "string" },
+                  category: { enum: ["actions_gate", "deployment"] },
+                  classification: { enum: ["attention", "in_progress", "unknown", "observation"] },
+                  priority: { enum: ["P0", "P1", "P2", "P3", null] },
+                  who: { type: "string" },
+                  what: { type: "string" },
+                  whyNow: { type: "string" },
+                  nextStep: { type: "string" },
+                  evidence: { type: "array", items: { type: "object", additionalProperties: true } },
+                  observedAt: { type: ["string", "null"], format: "date-time" },
+                  exitCondition: { type: "string" },
+                },
+              },
+            },
+            warnings: { type: "array", items: { type: "string" } },
           },
         },
         RepositoryList: {
