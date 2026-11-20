@@ -122,6 +122,17 @@ The factory narrative belongs to **all of Control Room's personality**, though e
 
 The anti-996 stance is a recognizable editorial voice, **not a functional or legal statement about labor conditions**. Satirical labels must never ridicule actual people, mask a failure, or make users mistake fabricated content for monitoring facts.
 
+### Mobile-first Control Room migration (2026-11-19)
+
+The approved redevelopment is **mobile-first**, using 360–390px as the initial design and browser acceptance widths and expanding deliberately to tablet and desktop. This refines the previous desktop-led implementation; it does not change the source-of-truth, read-only, or semantic state contracts.
+
+- Four business domains remain distinct: **中央厂务室** (/), **工程车间** (/engineering), **设备科** (/runtime), and **监察委员会** (/governance). On mobile, use a persistent four-item bottom navigation; preserve existing route semantics.
+- **血汗工厂 TV** (/factory) and **Mira System Wall** (/wall) are *peer, independent viewing channels*, not children of Engineering or substitutes for the business pages. Both must be directly accessible from the business shell; their existing implementations and source evidence remain intact.
+- Existing documentation (/docs) and public read-only API/MCP entry points must remain discoverable without consuming the four primary navigation slots.
+- Migrating business page bodies must preserve current data domains and evidence links: Overview's exceptions/snapshot/Projects; Engineering's repositories, workflows, releases and deployments; Runtime's probes, edge deployments and 24-hour analytics; Governance's Issues, PRs, protection, rulesets and Projects.
+- Prioritize exceptions, current work, operational facts and relevant sources above decorative mastheads. Satirical editorial copy is clearly distinguished from factual system state. If an integration is missing, say so rather than inventing a worker or status.
+- Implement as small, independently verifiable UI changes. Do not require or silently trigger Cloudflare Workers Observability queries during normal mobile browsing. Keep existing system/light/dark theme capability.
+
 ## 4. Responsive and accessible by default
 
 - Desktop: provide a dense overview and adjacent detail/evidence pane when the available width supports it.
