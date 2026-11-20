@@ -542,7 +542,12 @@ function assessChecks(
     detail.baseRef,
   );
   const { workflows, unassignedRuns } = groupWorkflowRuns(facts);
-  const assessed = assessWorkflowsForSha(workflows, detail.headSha, requiredFiles);
+  const assessed = assessWorkflowsForSha(
+    workflows,
+    detail.headSha,
+    requiredFiles,
+    detail.headRef,
+  );
 
   const summary: PullRequestCheckSummary = {
     requiredByGithub: requiredFiles === null ? "unknown" : "observed",
@@ -587,6 +592,61 @@ function assessChecks(
           observedAt: facts.headWorkflowRuns.observedAt,
         },
       ],
+      priority: null,
+    });
+  }
+
+  // The GitHub-required workflow set describes expected checks, not merely
+  // checks that happened to appear in the bounded head-SHA run list. A missing
+  // required workflow is *unknown*, never a successful/empty observation.
+  if (requiredFiles) {
+    const seen = new Set(assessed.map((workflow) => workflow.file));
+    for (const file of requiredFiles) {
+      if (seen.has(file)) continue;
+      summary.unknownRequired.push(file);
+      signals.push({
+        kind: "required_check_unknown",
+        status: "unknown",
+        detail: `Required workflow ${file} has no observed run for this PR head ref ${detail.headRef} and SHA ${detail.headSha}; this is not a proven pass.`,
+        evidence: [
+          {
+            label: `Required workflow ${file}: ${requiredEvidence?.source ?? "trusted source"}`,
+            url: null,
+            observedAt: requiredEvidence?.observedAt ?? facts.generatedAt,
+          },
+          {
+            label: `PR #${detail.number} head`,
+            url: detail.htmlUrl,
+            observedAt: detail.updatedAt,
+          },
+        ],
+        priority: null,
+      });
+    }
+  }
+
+  // SHA-only queries may include Runs of other refs or trigger types. The
+  // shared OPS-035 assessor drops those from applicableRun; preserve this
+  // uncertainty visibly rather than describing the PR as having passed checks.
+  const unmatched = assessed.filter(
+    (workflow) =>
+      workflows.some((source) => source.file === workflow.file && source.runs.length > 0) &&
+      workflow.applicableRun === null,
+  );
+  if (unmatched.length > 0) {
+    signals.push({
+      kind: "checks_coverage",
+      status: "unknown",
+      detail: `${unmatched.length} workflow(s) have SHA-matching runs but no run with the current PR head ref and applicable event; these runs cannot prove this PR's Gate status.`,
+      evidence: unmatched.flatMap((workflow) =>
+        workflow.latestRun
+          ? [{
+              label: `Excluded ${workflow.label} Run #${workflow.latestRun.id}`,
+              url: workflow.latestRun.htmlUrl,
+              observedAt: workflow.latestRun.updatedAt,
+            }]
+          : [],
+      ),
       priority: null,
     });
   }

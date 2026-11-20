@@ -105,9 +105,15 @@ OPS-036 does not reimplement required-check rules. It reuses OPS-035's
   the workflow required for the PR base branch;
 - without that evidence, a workflow failure is `unknown` and is not promoted to
   a proven required gate;
-- a same-SHA newer successful attempt is `recovered` and the old failure stays
+- a newer success clears an older failure only for the **same current PR head
+  SHA + head ref + applicable event**; a successful `workflow_dispatch` on
+  `prod` does not clear a failed PR check merely because the commit SHA matches;
+- a same-head newer successful attempt is `recovered` and the old failure stays
   archive evidence;
 - a running required workflow is `in_progress`, not human attention;
+- if trusted required-workflow evidence lists a workflow absent from the
+  applicable current head Run window, it is `unknownRequired` (unknown), not a
+  successful/empty observation;
 - required-check evidence is not supplied by the public route today, so
   `checks.requiredByGithub` is `unknown` in public responses.
 

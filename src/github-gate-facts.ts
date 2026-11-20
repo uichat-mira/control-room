@@ -322,14 +322,25 @@ function selectWorkflowRuns(
     .sort(newestFirst);
 }
 
-// A pull-request head is not a branch channel. Its workflow runs are keyed by
-// head SHA, while the required-check evidence belongs to the PR base branch.
+// A PR check is not simply any Actions Run on the same Git object. A push or
+// manual dispatch on a different branch may share the SHA but cannot establish
+// whether the current PR's required check was satisfied. The PR head ref comes
+// from GitHub's pull detail; unprovable event/ref combinations stay unknown.
 function selectWorkflowRunsForSha(
   workflow: PilotWorkflowFact,
   sha: string,
+  headRef: string | null,
 ): PilotWorkflowRunFact[] {
+  if (!headRef) return [];
   return workflow.runs
-    .filter((run) => run.headSha === sha && isGateEligible(run))
+    .filter((run) =>
+      run.headSha === sha &&
+      run.headBranch === headRef &&
+      (run.event === "pull_request" ||
+        run.event === "push" ||
+        run.event === "workflow_dispatch") &&
+      isGateEligible(run),
+    )
     .sort(newestFirst);
 }
 
@@ -387,6 +398,7 @@ export function assessWorkflowsForSha(
   workflows: PilotWorkflowFact[],
   sha: string | null,
   requiredFiles: Set<string> | null,
+  headRef: string | null,
 ): GateWorkflowAssessment[] {
   if (!sha) return workflows.map((workflow) =>
     assessWorkflowRuns(workflow, [], requiredStateFor(workflow.file, requiredFiles)),
@@ -394,7 +406,7 @@ export function assessWorkflowsForSha(
   return workflows.map((workflow) =>
     assessWorkflowRuns(
       workflow,
-      selectWorkflowRunsForSha(workflow, sha),
+      selectWorkflowRunsForSha(workflow, sha, headRef),
       requiredStateFor(workflow.file, requiredFiles),
     ),
   );

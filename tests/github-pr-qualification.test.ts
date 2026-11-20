@@ -530,3 +530,79 @@ test("a clean non-draft PR is observed, with required-check uncertainty explicit
     projected.warnings.some((warning) => /absence of hold evidence/i.test(warning)),
   );
 });
+
+test("newer unrelated prod dispatch cannot clear a failing required PR-head run", () => {
+  const result = qualifyPullRequest(
+    facts({ runs: [
+      run({
+        id: 100,
+        conclusion: "failure",
+        event: "pull_request",
+        headBranch: "feat/worker-404",
+        updatedAt: "2026-11-20T09:00:00Z",
+      }),
+      run({
+        id: 200,
+        conclusion: "success",
+        event: "workflow_dispatch",
+        headBranch: "prod",
+        updatedAt: "2026-11-20T09:10:00Z",
+      }),
+    ] }),
+    { requiredChecks: requiredChecks() },
+  );
+  assert.equal(result.status, "needs_attention");
+  assert.equal(result.checks.workflows[0].applicableRun?.id, 100);
+  assert.deepEqual(result.checks.failingRequired, ["build-desktop.yml"]);
+  assert.equal(result.checks.workflows[0].recovered, false);
+});
+
+test("unrelated dispatch failure on identical SHA does not create PR-required-check attention", () => {
+  const result = qualifyPullRequest(
+    facts({ runs: [
+      run({
+        id: 200,
+        conclusion: "failure",
+        event: "workflow_dispatch",
+        headBranch: "prod",
+        updatedAt: "2026-11-20T09:10:00Z",
+      }),
+    ] }),
+    { requiredChecks: requiredChecks() },
+  );
+  assert.equal(result.status, "unknown");
+  assert.deepEqual(result.checks.failingRequired, []);
+  assert.deepEqual(result.checks.unknownRequired, ["build-desktop.yml"]);
+  assert.equal(result.checks.workflows[0].applicableRun, null);
+  assert.ok(result.signals.some((signal) => signal.kind === "checks_coverage"));
+});
+
+test("known mandatory workflow absent from head runs is unknown, not observed", () => {
+  const result = qualifyPullRequest(
+    facts({ runs: [] }),
+    { requiredChecks: requiredChecks() },
+  );
+  assert.equal(result.status, "unknown");
+  assert.equal(result.checks.requiredByGithub, "observed");
+  assert.deepEqual(result.checks.unknownRequired, ["build-desktop.yml"]);
+  assert.ok(result.signals.some(
+    (signal) => signal.kind === "required_check_unknown" && signal.status === "unknown",
+  ));
+});
+
+test("manual workflow dispatch on the exact PR head ref is still applicable", () => {
+  const result = qualifyPullRequest(
+    facts({ runs: [
+      run({
+        id: 200,
+        conclusion: "success",
+        event: "workflow_dispatch",
+        headBranch: "feat/worker-404",
+      }),
+    ] }),
+    { requiredChecks: requiredChecks() },
+  );
+  assert.equal(result.status, "observed");
+  assert.equal(result.checks.workflows[0].applicableRun?.id, 200);
+  assert.equal(result.checks.workflows[0].outcome, "success");
+});
