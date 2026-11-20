@@ -40,6 +40,7 @@ Control Room exposes a versioned, read-only, public-safe API. It only projects p
 - `GET /api/v1/analytics` — Workers last-24h requests and errors
 - `GET /api/v1/governance` — Issues / PR / branch protection / rulesets / Projects
 - `GET /api/v1/projects` — public GitHub Projects
+- `GET /api/v1/github/facts` — bounded six-repository raw branch / workflow-run / open-PR facts with explicit coverage, freshness, rate-limit and per-round request-budget evidence
 - `GET /api/v1/factory/runs` — bounded, cached real External Worker discovery across public organization repositories (GitHub Actions only; no Workers Logs scan)
 - `GET /api/v1/factory/run?repository=...&runId=...` — sanitized real External Worker lifecycle projection; `includeReporter=false` avoids Workers Logs for GitHub-only details
 - `GET /openapi.json` — OpenAPI 3.1 contract
@@ -109,6 +110,8 @@ Only Cloudflare resources whose names contain `mira` or `uichat` are exposed by 
 ## GitHub read model
 
 The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the Worker runtime as the internal binding `GITHUB_READ_TOKEN`. The public API deliberately requests only public repositories even if the credential itself can read more.
+
+`/api/v1/github/facts` is the bounded raw-fact input for the OPS-033 pilot repositories (`mira-desktop`, `mira-mobile`, `cloud-auth`, `mira-cloud`, `cloud-pi`, `control-room`). One shared snapshot reads branch refs, explicit workflow runs, and open PRs from a six-repository allowlist, then reports observed / missing / inaccessible / rate-limited / timed-out / truncated / budget-skipped sources separately. Repositories outside the allowlist are explicitly unknown, not healthy. The Worker keeps one shared snapshot for an hour and does not change the existing overview, Factory TV, or MCP semantics. See [`docs/github-attention-facts.md`](docs/github-attention-facts.md).
 
 ## Views
 
