@@ -34,21 +34,21 @@ const governance = (name: string, protectedState: boolean | null): GovernanceRep
     defaultBranchProtected: protectedState, activeRulesets: 0 },
 });
 
-test("runtime failures lead; unprotected default branch is separate review, not a service outage", () => {
+test("runtime failures lead; a latest Run failure is archive, not a service outage", () => {
   const result = collectAttention(
     [repo("failed", lastRun("completed", "failure"))],
     [service("ok", "online"), service("bad", "offline"), service("slow", "degraded")],
     [governance("open", false), governance("unknown", null), governance("good", true)],
   );
-  assert.equal(result.length, 4);
-  assert.deepEqual(result.map(x => x.category), ["service", "build", "service", "policy"]);
-  assert.deepEqual(result.map(x => x.severity), ["failure", "failure", "warning", "review"]);
+  assert.equal(result.length, 3);
+  assert.deepEqual(result.map(x => x.category), ["service", "service", "policy"]);
+  assert.deepEqual(result.map(x => x.severity), ["failure", "warning", "review"]);
   assert.equal(result.filter(x => x.category === "policy").length, 1);
-  assert.equal(result.filter(x => x.category !== "policy").length, 3);
+  assert.equal(result.filter(x => x.category !== "policy").length, 2);
   assert.equal(result[0].href, "https://mira.tomz.io/");
 });
 
-test("running, successful, cancelled and missing-conclusion builds are not failures", () => {
+test("running, successful, cancelled, action_required and failed latest Runs are all archive facts", () => {
   const result = collectAttention([
     repo("pending", lastRun("queued", null)),
     repo("running", lastRun("in_progress", null)),
@@ -56,7 +56,11 @@ test("running, successful, cancelled and missing-conclusion builds are not failu
     repo("cancelled", lastRun("completed", "cancelled")),
     repo("missing", lastRun("completed", null)),
     repo("no-run", null),
+    repo("action", lastRun("completed", "action_required")),
+    repo("failed", lastRun("completed", "failure")),
   ], [service("ok", "online")], [governance("unknown", null)]);
+  // A raw latest Run (even failure/action_required) cannot prove a necessary
+  // Gate or runtime impact, so it does not become an attention item here.
   assert.deepEqual(result, []);
 });
 

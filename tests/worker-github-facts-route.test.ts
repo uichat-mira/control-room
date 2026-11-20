@@ -3,7 +3,10 @@ import test, { after, afterEach, before, beforeEach } from "node:test";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 
-import { handleGitHubFactsRequest } from "../src/github-facts-route.ts";
+import {
+  handleGitHubFactsRequest,
+  handleGitHubGateRequest,
+} from "../src/github-facts-route.ts";
 import { PILOT_REPOSITORIES } from "../src/github-facts.ts";
 
 const network = setupServer();
@@ -209,6 +212,42 @@ test("a partial source stays partial in the cached public projection", async () 
   assert.equal(second.response.headers.get("x-mira-github-facts-cache"), "hit");
   assert.equal(second.body.status, "partial");
   assert.equal(calls, 36);
+});
+
+test("Gate qualification handler is a read-only derivation from the same cached facts round", async () => {
+  installHandlers();
+
+  const read = () =>
+    handleGitHubGateRequest(new Request(`${origin}/api/v1/github/gates`), env);
+
+  const first = await read();
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.get("x-mira-api-version"), "v1");
+  assert.equal(first.headers.get("x-mira-github-gates-cache"), "miss");
+  assert.equal(first.headers.get("x-mira-github-gates-scope"), "pilot-6");
+  assert.equal(first.headers.get("x-mira-github-gates-budget"), "36/40");
+  assert.equal(first.headers.get("x-mira-github-gates-required-by-github"), "unavailable");
+  assert.equal(first.headers.get("x-mira-github-gates-production-evidence"), "unavailable");
+  assert.equal(calls, 36, "qualification must not add an upstream GitHub read");
+
+  const firstText = await first.text();
+  const body = JSON.parse(firstText) as Record<string, unknown>;
+  assert.equal(body.source, "github-facts-derivation");
+  assert.equal(body.requiredCheckEvidence, "unavailable");
+  assert.equal(body.productionEvidence, "unavailable");
+  assert.equal((body.coverage as { status: string }).status, "partial");
+  assert.ok(Array.isArray(body.candidates));
+  assert.ok(
+    (body.warnings as string[]).some((warning) => /required checks are not readable/i.test(warning)),
+  );
+  assert.doesNotMatch(firstText, new RegExp(token));
+
+  const second = await read();
+  assert.equal(second.status, 200);
+  assert.equal(second.headers.get("x-mira-github-gates-cache"), "hit");
+  assert.equal(calls, 36, "a second visitor must reuse the shared snapshot");
+  const secondBody = (await second.json()) as { factsGeneratedAt: string };
+  assert.equal(secondBody.factsGeneratedAt, body.factsGeneratedAt);
 });
 
 test("cache API outage falls back to one isolate-local snapshot, not one scan per visitor", async () => {
