@@ -10,6 +10,7 @@ import { openApiDocument } from "./openapi";
 import { getServiceSnapshot } from "./services";
 import { getFactoryRunProjection, type FactoryRunProjection } from "./factory-read-model";
 import { getFactoryFeed, type FactoryFeed } from "./factory-feed";
+import { handleGitHubFactsRequest } from "./github-facts-route";
 import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
 
 const AUTH_GITHUB_TTL_SECONDS = 15 * 60;
@@ -379,6 +380,7 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
         "/api/v1/analytics",
         "/api/v1/governance",
         "/api/v1/projects",
+        "/api/v1/github/facts",
         "/api/v1/factory/runs",
         "/api/v1/factory/run?repository=uichat-mira/mira-mobile&runId=...",
       ],
@@ -497,6 +499,10 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
         error: reason,
       }), { status });
     }
+  }
+
+  if (pathname === "/api/v1/github/facts") {
+    return handleGitHubFactsRequest(request, env);
   }
 
   if (pathname === "/api/v1/governance" || pathname === "/api/v1/projects") {
