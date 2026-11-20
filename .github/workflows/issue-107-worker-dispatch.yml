@@ -1,0 +1,37 @@
+name: OPS-036 External Worker Dispatch
+
+# One-shot GitHub-native Issue-linked dispatch; not a source artifact for dev.
+on:
+  push:
+    branches:
+      - chore/issue-107-worker-dispatch
+    paths:
+      - .github/workflows/issue-107-worker-dispatch.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-036-worker-dispatch
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
+    uses: uichat-mira/.github/.github/workflows/mira-external-worker.yml@ffafbf0c79ad59daeaf3f78f88f9942a219a02e1
+    with:
+      issue_number: 107
+      base_branch: chore/issue-107-worker-dispatch
+      timeout_minutes: 60
+      provider: opencode-go
+      model: deepseek-v4.1-flash
+      verification_command: |
+        npm install --no-audit --no-fund
+        npm run check
+    secrets:
+      opencode_go_api_key: ${{ secrets.AI_PROVIDER_OPENCODE_GO_KEY }}
+      haomai_reporter_hmac_secret: ${{ secrets.HAOMAI_REPORTER_HMAC_SECRET }}
