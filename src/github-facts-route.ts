@@ -81,10 +81,17 @@ async function bypassScan(
   return { snapshot, cache: "bypass" };
 }
 
-export async function loadGitHubFactsSnapshot(
+type FactsLoad = { snapshot: GitHubFactsSnapshot; cache: "hit" | "miss" | "bypass" };
+
+// An edge Cache miss is not a lock. Concurrent visitors in the same isolate
+// must share one outstanding refresh instead of multiplying its 36 REST calls.
+// Cross-isolate/POP coordination remains unproven and is reported as such.
+const inFlightLoads = new Map<string, Promise<FactsLoad>>();
+
+async function loadUncoalescedGitHubFactsSnapshot(
   request: Request,
   env: GitHubEnv,
-): Promise<{ snapshot: GitHubFactsSnapshot; cache: "hit" | "miss" | "bypass" }> {
+): Promise<FactsLoad> {
   const authState: AuthState = env.GITHUB_READ_TOKEN ? "gh-auth" : "gh-anon";
   let edgeCache: Cache | null = null;
   let keys: ReturnType<typeof factsCacheKeys> | null = null;
@@ -136,6 +143,25 @@ export async function loadGitHubFactsSnapshot(
     };
   }
   return { snapshot: next, cache: "miss" };
+}
+
+export function loadGitHubFactsSnapshot(
+  request: Request,
+  env: GitHubEnv,
+): Promise<FactsLoad> {
+  const key = `${new URL(request.url).origin}:${env.GITHUB_READ_TOKEN ? "gh-auth" : "gh-anon"}`;
+  const running = inFlightLoads.get(key);
+  if (running) return running;
+
+  const next = loadUncoalescedGitHubFactsSnapshot(request, env);
+  inFlightLoads.set(key, next);
+  const clear = () => {
+    if (inFlightLoads.get(key) === next) inFlightLoads.delete(key);
+  };
+  // Both success and failure release the lock. Do not create an unhandled
+  // rejected promise from a detached .finally() chain.
+  void next.then(clear, clear);
+  return next;
 }
 
 export async function handleGitHubFactsRequest(

@@ -324,26 +324,22 @@ interface PreviousEntry<T> {
   value: T;
 }
 
+// Callers may narrow a collection round but cannot widen its validated cost
+// or timeout envelope. Non-finite runtime overrides fall back to safe defaults.
+function boundedLimit(value: number | undefined, fallback: number, min: number, max: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
 function normalizeLimits(input: Partial<GitHubFactLimits> | undefined): GitHubFactLimits {
-  const maxRequests = Math.max(1, Math.floor(input?.maxRequests ?? DEFAULT_FACT_LIMITS.maxRequests));
-  const concurrency = Math.max(
-    1,
-    Math.min(6, Math.floor(input?.concurrency ?? DEFAULT_FACT_LIMITS.concurrency)),
-  );
-  const timeoutMs = Math.max(
-    1,
-    Math.floor(input?.timeoutMs ?? DEFAULT_FACT_LIMITS.timeoutMs),
-  );
-  const maxRetries = Math.max(0, Math.floor(input?.maxRetries ?? DEFAULT_FACT_LIMITS.maxRetries));
-  const maxRetryDelayMs = Math.max(
-    0,
-    Math.floor(input?.maxRetryDelayMs ?? DEFAULT_FACT_LIMITS.maxRetryDelayMs),
-  );
-  const refreshSeconds = Math.max(
-    1,
-    Math.floor(input?.refreshSeconds ?? DEFAULT_FACT_LIMITS.refreshSeconds),
-  );
-  return { maxRequests, concurrency, timeoutMs, maxRetries, maxRetryDelayMs, refreshSeconds };
+  return {
+    maxRequests: boundedLimit(input?.maxRequests, DEFAULT_FACT_LIMITS.maxRequests, 1, DEFAULT_FACT_LIMITS.maxRequests),
+    concurrency: boundedLimit(input?.concurrency, DEFAULT_FACT_LIMITS.concurrency, 1, DEFAULT_FACT_LIMITS.concurrency),
+    timeoutMs: boundedLimit(input?.timeoutMs, DEFAULT_FACT_LIMITS.timeoutMs, 1, DEFAULT_FACT_LIMITS.timeoutMs),
+    maxRetries: boundedLimit(input?.maxRetries, DEFAULT_FACT_LIMITS.maxRetries, 0, DEFAULT_FACT_LIMITS.maxRetries),
+    maxRetryDelayMs: boundedLimit(input?.maxRetryDelayMs, DEFAULT_FACT_LIMITS.maxRetryDelayMs, 0, DEFAULT_FACT_LIMITS.maxRetryDelayMs),
+    refreshSeconds: boundedLimit(input?.refreshSeconds, DEFAULT_FACT_LIMITS.refreshSeconds, 1, 24 * 60 * 60),
+  };
 }
 
 function headers(env: GitHubEnv, etag: string | null): Record<string, string> {

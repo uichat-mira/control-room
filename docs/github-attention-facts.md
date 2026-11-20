@@ -83,11 +83,13 @@ One deterministic round is:
 
 The allocator enforces `maxRequests: 40` per round, `concurrency: 4`,
 `timeoutMs: 8000`, and at most one `429`/rate-limit retry when `Retry-After`
-is within a 2-second window. Exhausting the round budget stops incremental
+is within a 2-second window. Callers may narrow, not widen, these caps. Exhausting the round budget stops incremental
 collection; it never retries forever and never turns the gap into zero.
 
 The Worker caches one shared snapshot for both visitors (auth/anonymous cache
-keys are separate) for `refreshSeconds: 3600`, with a 24-hour stale copy used
+keys are separate) for `refreshSeconds: 3600`. Concurrent cold-cache
+requests within the same isolate share a single in-flight collection, with a
+24-hour stale copy used
 only as a conditional-request baseline. Re-visits do not scan GitHub again. If
 the Workers cache API itself is unavailable, an isolate-local snapshot absorbs
 repeated reads for the same window rather than scanning per visitor.
@@ -112,7 +114,8 @@ expected production configuration.
 collector reports the measured per-round count and `globalBoundProven: false`.
 Cloudflare edge cache is per cache location/isolate; multiple isolates, cache
 misses, or separate auth states can each refresh, so the code does not claim a
-global hourly hard limit. `304` responses are counted and keep their older
+global hourly hard limit. The singleflight guarantee is isolate-local; it
+is not a globally distributed lock. `304` responses are counted and keep their older
 `observedAt`; ETag conditional requests reduce payload and normally do not
 consume GitHub's REST primary quota, but they still consume Worker subrequests.
 

@@ -242,6 +242,25 @@ test("reads the six-repository allowlist with measured per-round budget and zero
   assert.ok(calls.every((call) => !call.url.includes("mira-docs")));
 });
 
+test("oversized or non-finite budget overrides cannot widen the collection envelope", async () => {
+  installDefaultHandlers();
+  const snapshot = await collectGitHubFacts(
+    { GITHUB_READ_TOKEN: token },
+    { limits: { maxRequests: 500, concurrency: 100, timeoutMs: 500_000, maxRetries: 100, maxRetryDelayMs: 300_000 } },
+  );
+  assert.equal(snapshot.budget.maxRequests, 40);
+  assert.equal(snapshot.budget.concurrency, 4);
+  assert.equal(snapshot.budget.timeoutMs, 8_000);
+  assert.equal(snapshot.budget.usedRequests, 36);
+
+  const fallback = await collectGitHubFacts(
+    { GITHUB_READ_TOKEN: token },
+    { limits: { maxRequests: Number.NaN, concurrency: Number.POSITIVE_INFINITY }, now: Date.parse("2026-11-20T10:00:00Z") },
+  );
+  assert.equal(fallback.budget.maxRequests, 40);
+  assert.equal(fallback.budget.concurrency, 4);
+});
+
 test("missing credential is explicit and never fabricates authenticated access", async () => {
   installDefaultHandlers();
 

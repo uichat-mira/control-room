@@ -156,6 +156,26 @@ test("one shared Worker snapshot serves many visitors with bounded fan-out and n
   );
 });
 
+test("simultaneous cold-cache visitors share one in-flight GitHub round", async () => {
+  installHandlers();
+  const results = await Promise.all(
+    Array.from({ length: 4 }, (_, i) =>
+      readFacts({ "cf-connecting-ip": `198.51.100.${i + 10}` }),
+    ),
+  );
+
+  assert.equal(calls, 36, "four simultaneous visitors must not make four 36-call scans");
+  assert.ok(results.every((result) => result.response.status === 200));
+  assert.ok(results.every((result) => result.body.status === "complete"));
+  assert.equal(new Set(results.map((result) => result.body.generatedAt)).size, 1);
+  assert.ok(results.every((result) => !result.text.includes(token)));
+
+  // The singleflight lock must be released after resolution.
+  const next = await readFacts();
+  assert.equal(next.response.headers.get("x-mira-github-facts-cache"), "hit");
+  assert.equal(calls, 36);
+});
+
 test("a partial source stays partial in the cached public projection", async () => {
   installHandlers();
   network.use(
