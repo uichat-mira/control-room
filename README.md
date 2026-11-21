@@ -128,7 +128,10 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 
 - `/` — Central Office: entry dashboard with bounded signals and direct links to Engineering, Runtime, Governance, Attention, Factory TV and System Wall; no global exact todo count.
 - `/attention` — Attention & Evidence: qualified need-attention / in-progress / observation / unknown records, source coverage and deliberate single-PR / Worker inspections (OPS-038).
-- `/engineering` — repositories, latest default-branch builds, releases, Workers, and Pages delivery
+- `/engineering` — GitHub engineering entry dashboard: repository, build, Release
+- `/engineering/repos` — searchable repository archive with GitHub Run / Release links
+- `/engineering/builds` — one most recent default-branch Run per repository, not build history
+- `/engineering/releases` — one latest discovered GitHub Release per repository, not version history
 - `/runtime` — live service probes, Workers, Pages, and 24-hour traffic/error analytics
 - `/governance` — Issues, pull requests, default-branch protection, rulesets, and public Projects
 - `/wall` — large-screen operations view; forced dark theme and 60-second refresh

@@ -65,7 +65,7 @@ const routes: Record<PageKey, {
     path: "/engineering",
     title: "工程车间",
     eyebrow: "BUILD / DELIVERY",
-    deck: "仓库、构建、发布和交付。代码不是靠喊口号上线的。",
+    deck: "",
   },
   runtime: {
     path: "/runtime",
@@ -91,7 +91,7 @@ const nav = [
 function pageKeyForPath(pathname: string): PageKey {
   const normalized = pathname !== "/" ? pathname.replace(/\/+$/, "") : pathname;
   if (normalized === routes.attention.path) return "attention";
-  if (normalized === routes.engineering.path) return "engineering";
+  if (normalized === routes.engineering.path || normalized.startsWith(routes.engineering.path + "/")) return "engineering";
   if (normalized === routes.runtime.path) return "runtime";
   if (normalized === routes.governance.path) return "governance";
   return "overview";
@@ -273,6 +273,9 @@ export default function App() {
         <Route index element={<Overview />} />
         <Route path="attention" element={<AttentionDeskPage />} />
         <Route path="engineering" element={<Engineering />} />
+        <Route path="engineering/repos" element={<Engineering view="repos" />} />
+        <Route path="engineering/builds" element={<Engineering view="builds" />} />
+        <Route path="engineering/releases" element={<Engineering view="releases" />} />
         <Route path="runtime" element={<Runtime />} />
         <Route path="governance" element={<Governance />} />
       </Route>
