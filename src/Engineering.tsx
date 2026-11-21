@@ -93,8 +93,6 @@ export default function Engineering({ view = "home" }: { view?: EngineeringView 
   const releaseRows = useMemo(() => latestReleaseRows(repos), [repos]);
   const noCurrentRead = Boolean(read.error);
   const degraded = read.data?.status === "degraded";
-  const sectionTitle = view === "repos" ? "仓库档案" :
-    view === "builds" ? "近期构建" : "Release";
 
   if (!read.data && !read.error) return (
     <section className="page-state">
@@ -152,15 +150,6 @@ export default function Engineering({ view = "home" }: { view?: EngineeringView 
         <>
           <div className="ew-detail-header">
             <Link className="ew-back" to="/engineering">← 工程车间</Link>
-            <h2>{sectionTitle}</h2>
-            <nav className="ew-subnav" aria-label="工程档案分类">
-              {directory.map(item => (
-                <Link to={item.to} key={item.to}
-                  aria-current={item.to.endsWith("/" + view) ? "page" : undefined}>
-                  {item.title}
-                </Link>
-              ))}
-            </nav>
           </div>
 
           {view === "repos" && (

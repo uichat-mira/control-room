@@ -21,13 +21,8 @@
 .ew-entry > span {color:var(--text-soft);font-size:11px;}
 .ew-fineprint {color:var(--text-faint);font-size:10px;line-height:1.6;margin:15px 0 12px;}
 .ew-detail-header {padding:7px 0 0;}
-.ew-back {display:inline-flex;font-size:11px;color:var(--accent);margin:6px 0 17px;}
+.ew-back {display:inline-flex;font-size:11px;color:var(--accent);margin:6px 0 10px;}
 .ew-back:hover {text-decoration:underline;}
-.ew-detail-header h2 {font-size:clamp(21px,3vw,28px);letter-spacing:-.04em;line-height:1.3;margin:0 0 13px;}
-.ew-subnav {display:flex;flex-wrap:wrap;gap:3px 19px;border-bottom:1px solid var(--line);}
-.ew-subnav a {padding:8px 0 12px;border-bottom:2px solid transparent;color:var(--text-soft);font-size:12px;}
-.ew-subnav a[aria-current=page] {border-color:var(--accent);color:var(--text);font-weight:740;}
-.ew-subnav a:hover {color:var(--text);}
 .ew-section {min-width:0;padding-top:10px;}
 .ew-result-count {color:var(--text-faint);font-size:10px;line-height:1.6;padding:8px 0;}
 .ew-empty {margin:0;border-top:1px solid var(--line);padding:17px 0;color:var(--text-soft);font-size:12px;line-height:1.7;}

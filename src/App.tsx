@@ -81,6 +81,14 @@ const routes: Record<PageKey, {
   },
 };
 
+// Detail routes own their masthead: a destination, not three tabs inside
+// the generic Engineering page. The factory navigation remains highlighted.
+const engineeringDetailMeta: Record<string, { title: string; eyebrow: string; deck: string }> = {
+  "/engineering/repos": { title: "仓库档案", eyebrow: "ENGINEERING / REPOSITORIES", deck: "" },
+  "/engineering/builds": { title: "近期构建", eyebrow: "ENGINEERING / BUILDS", deck: "" },
+  "/engineering/releases": { title: "Release", eyebrow: "ENGINEERING / RELEASES", deck: "" },
+};
+
 const nav = [
   ["overview", "厂务", Gauge],
   ["engineering", "工程", Wrench],
@@ -114,7 +122,7 @@ function LoadingPage() {
 function ControlLayout() {
   const { pathname } = useLocation();
   const page = pageKeyForPath(pathname);
-  const meta = routes[page];
+  const meta = engineeringDetailMeta[pathname.replace(/\/+$/, "")] ?? routes[page];
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem("mira-control-room-theme");
     return saved === "light" || saved === "dark" || saved === "system" ? saved : "dark";
