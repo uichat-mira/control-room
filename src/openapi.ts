@@ -123,6 +123,43 @@ export function openApiDocument(origin: string) {
           },
         },
       },
+      "/api/v1/github/pull": {
+        get: {
+          tags: ["github"],
+          summary: "Single-PR merge-blocker qualification",
+          description:
+            "On-demand, bounded read-only projection of one public pilot PR. It reads the PR detail, its reviews and the workflow runs for the exact head SHA, then classifies needs_attention/in_progress/observed/unknown. Draft and explicitly sourced Hold/dependency evidence stay out of attention. mergeable=null is unknown, not a conflict. Only a current-head maintainer CHANGES_REQUESTED or a proven required-check failure becomes attention; GitHub required-check configuration remains unknown unless trusted evidence is supplied. Labels, comments and ordinary AI review strings are never parsed as hold or review authority.",
+          parameters: [
+            {
+              name: "repository",
+              in: "query",
+              required: true,
+              schema: {
+                type: "string",
+                pattern: "^uichat-mira/(mira-desktop|mira-mobile|cloud-auth|mira-cloud|cloud-pi|control-room)$",
+              },
+            },
+            {
+              name: "number",
+              in: "query",
+              required: true,
+              schema: { type: "integer", minimum: 1 },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Single-PR qualification with explicit coverage and evidence",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/GitHubPullRequest" },
+                },
+              },
+            },
+            "400": { description: "Invalid repository or PR number" },
+            "404": { description: "Repository is outside the six-repository pilot allowlist" },
+          },
+        },
+      },
       "/api/v1/governance": {
         get: {
           tags: ["governance"],
@@ -479,6 +516,49 @@ export function openApiDocument(origin: string) {
                 },
               },
             },
+            warnings: { type: "array", items: { type: "string" } },
+          },
+        },
+        GitHubPullRequest: {
+          type: "object",
+          required: [
+            "apiVersion", "source", "generatedAt", "factsGeneratedAt", "factsStatus",
+            "id", "repository", "number", "status", "classification", "priority",
+            "who", "what", "whyNow", "nextStep", "evidence", "observedAt",
+            "exitCondition", "review", "checks", "hold", "signals", "coverage",
+            "warnings",
+          ],
+          properties: {
+            apiVersion: { const: "v1" },
+            source: { const: "github-pr-derivation" },
+            generatedAt: { type: "string", format: "date-time" },
+            factsGeneratedAt: { type: "string", format: "date-time" },
+            factsStatus: { enum: ["complete", "partial", "unavailable"] },
+            id: { type: "string", pattern: "^pr:uichat-mira/[A-Za-z0-9_.-]+#[0-9]+$" },
+            repository: { type: "string" },
+            number: { type: "integer", minimum: 1 },
+            status: { enum: ["needs_attention", "in_progress", "observed", "unknown"] },
+            classification: { enum: ["attention", "in_progress", "unknown", "observation"] },
+            priority: { enum: ["P0", "P1", "P2", "P3", null] },
+            who: { type: "string" },
+            what: { type: "string" },
+            whyNow: { type: "string" },
+            nextStep: { type: "string" },
+            evidence: { type: "array", items: { type: "object", additionalProperties: true } },
+            observedAt: { type: ["string", "null"], format: "date-time" },
+            exitCondition: { type: "string" },
+            state: { type: ["string", "null"] },
+            draft: { type: ["boolean", "null"] },
+            merged: { type: ["boolean", "null"] },
+            baseRef: { type: ["string", "null"] },
+            headSha: { type: ["string", "null"] },
+            mergeable: { type: ["boolean", "null"] },
+            mergeableState: { type: ["string", "null"] },
+            review: { type: "object", additionalProperties: true },
+            checks: { type: "object", additionalProperties: true },
+            hold: { type: "object", additionalProperties: true },
+            signals: { type: "array", items: { type: "object", additionalProperties: true } },
+            coverage: { type: "object", additionalProperties: true },
             warnings: { type: "array", items: { type: "string" } },
           },
         },

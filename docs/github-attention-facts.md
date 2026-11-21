@@ -4,8 +4,10 @@
 > collector, not attention eligibility. OPS-035 Gate/Release qualification now
 > derives from this snapshot at `GET /api/v1/github/gates` with zero additional
 > GitHub reads (see [`github-attention-gate-status.md`](github-attention-gate-status.md));
-> PR / Worker judgment stays with OPS-036–037, and the Overview redesign stays
-> with OPS-038.
+> single-PR merge-blocker qualification is implemented by OPS-036 at
+> [`github-attention-pr-status.md`](github-attention-pr-status.md) using bounded
+> on-demand PR detail reads. Worker judgment stays with OPS-037, and the Overview
+> redesign stays with OPS-038.
 
 ## Scope
 
