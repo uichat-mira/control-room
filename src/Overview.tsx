@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Link } from "react-router";
+import { TuiSpinner } from "./TuiLoading";
 import {
   Activity, ArrowRight, ArrowUpRight, BookOpen, Clapperboard,
   ExternalLink, Monitor, Radio, ShieldCheck, Wrench,
@@ -82,6 +83,12 @@ export default function Overview() {
   const cloudResources = cloudflareReady
     ? snapshot.cloudflare.workers.length + snapshot.cloudflare.pages.length : null;
   const lastObserved = gates?.factsGeneratedAt ?? snapshot?.generatedAt ?? null;
+  const initialCollectionPending =
+    (!summary.data && !summary.error) ||
+    (!workers.data && !workers.error) ||
+    (!gatesRead.data && !gatesRead.error) ||
+    (!factsRead.data && !factsRead.error);
+  const refreshFailed = !!(summary.error || workers.error || gatesRead.error || factsRead.error);
   const activeNote = signals.activeWorkers === null
     ? "Worker 状态待核实"
     : signals.activeWorkers === 0 ? "本次有界发现没有执行中的 Run" : "本次有界发现有正在执行的 Run";
@@ -100,9 +107,11 @@ export default function Overview() {
           <h2>从这里进入</h2>
           <p>一个入口，一项职责。状态只做提示，详情交给各部门与专用控制台。</p>
         </div>
-        <span className="dashboard-readonly">
-          <span className="dashboard-live-dot" aria-hidden="true" />
-          公开只读 · {lastObserved ? "采集 " + formatTime(lastObserved) : "等待首次采集"}
+        <span className="dashboard-readonly" role="status">
+          {initialCollectionPending ? <TuiSpinner /> : <span className="dashboard-live-dot" aria-hidden="true" />}
+          公开只读 · {refreshFailed ? "部分来源刷新失败" :
+            initialCollectionPending ? "正在核对只读快照" :
+              lastObserved ? "采集 " + formatTime(lastObserved) : "来源未提供观察时间"}
         </span>
       </header>
 
