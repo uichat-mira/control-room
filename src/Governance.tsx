@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { TuiLoading } from "./TuiLoading";
 import {
   Activity, ArrowRight, ChevronDown, CircleAlert, ExternalLink,
   GitBranch, GitPullRequest, ListTodo, Search, ShieldAlert,
@@ -71,11 +72,16 @@ export default function Governance() {
 
   if (!data) {
     return (
-      <section className="page-state" role="status">
-        <ShieldCheck size={16}/>
-        <div><strong>{read.error ? "监察记录暂时无法读取" : "正在获取真实治理记录"}</strong>
-          <small>{read.error ?? "GitHub Issues、PR、分支规则与组织 Project 正在读取中。"}</small>
-        </div>
+      <section className="page-state">
+        {read.error ? (
+          <div role="status"><strong>监察记录暂时无法读取</strong><small>{read.error}</small></div>
+        ) : (
+          <TuiLoading
+            title="正在获取真实治理记录"
+            detail="GitHub Issues、PR、分支规则与组织 Project"
+            command="GOVERNANCE / AUDIT"
+          />
+        )}
       </section>
     );
   }

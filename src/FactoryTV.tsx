@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { TuiLoading } from "./TuiLoading";
 import { Link, NavLink, useLocation, useSearchParams } from "react-router";
 import { Activity, ArrowRight, CircleAlert, Clock3, ExternalLink, Radio, ShieldCheck } from "lucide-react";
 import type { FactoryRunProjection, FactoryState } from "./factory-read-model";
@@ -304,8 +305,9 @@ function FactoryLiveWall() {
           <p className="factory-feed-alert">当前只读取部分公开仓库：{feed.failedRepositories} 个来源失败
             {feed.coverageLimited ? "，超出当次扫描上限" : ""}。这些数字不是组织总量。</p>}
         {!feed && !feedError ? (
-          <div className="factory-missing"><Activity size={19}/><strong>正在寻找真实施工记录</strong>
-            <p>只查询 GitHub Actions，不扫描 Cloudflare Logs。</p></div>
+          <div className="factory-missing">
+            <TuiLoading title="正在寻找真实施工记录" detail="只查询 GitHub Actions，不扫描 Cloudflare Logs" command="FACTORY / DISCOVER" />
+          </div>
         ) : items.length === 0 ? (
           <div className="factory-missing"><ShieldCheck size={19}/><strong>{feedError ? "暂无可读取的真实工位" : "当前没有可显示的施工记录"}</strong>
             <p>{feedError ? "GitHub 不可用，不能判断是否空闲。" : "最近 " + feed?.historyDays + " 天内未发现实际执行的 External Worker Run；不会用假工位填充。"}</p>
@@ -436,7 +438,9 @@ export default function FactoryTV() {
           ) : realError ? (
             <div className="factory-missing"><CircleAlert size={19} /><strong>真实 Run 暂时不可读</strong><p>{realError}</p><p>不会退回显示为真实数据。</p><Link to="/factory">返回真实施工墙 <ArrowRight size={14} /></Link></div>
           ) : !live ? (
-            <div className="factory-missing"><Activity size={19} /><strong>正在读取真实 Run</strong><p>服务器只返回脱敏后的生命周期投影，不向浏览器提供 GitHub / Cloudflare 凭据。</p></div>
+            <div className="factory-missing">
+              <TuiLoading title="正在读取真实 Run" detail="只返回脱敏的生命周期投影，不下发 GitHub / Cloudflare 凭据" command="FACTORY / RUN EVIDENCE" />
+            </div>
           ) : (
             <>
               <div className="factory-room-meta">

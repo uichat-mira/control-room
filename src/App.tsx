@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import { TuiLoading } from "./TuiLoading";
 import {
   Link,
   Navigate,
@@ -23,9 +24,10 @@ import {
 } from "lucide-react";
 
 type ThemeMode = "system" | "light" | "dark";
-type PageKey = "overview" | "engineering" | "runtime" | "governance";
+type PageKey = "overview" | "attention" | "engineering" | "runtime" | "governance";
 
 const Overview = lazy(() => import("./Overview"));
+const AttentionDeskPage = lazy(() => import("./AttentionDeskPage"));
 const Engineering = lazy(() => import("./Engineering"));
 const Runtime = lazy(() => import("./Runtime"));
 const Governance = lazy(() => import("./Governance"));
@@ -51,13 +53,19 @@ const routes: Record<PageKey, {
     path: "/",
     title: "中央厂务室",
     eyebrow: "MIRA / CENTRAL OFFICE",
-    deck: "今天的生产秩序，由事实与证据负责。",
+    deck: "",
+  },
+  attention: {
+    path: "/attention",
+    title: "关注与证据",
+    eyebrow: "ACTION DESK / EVIDENCE",
+    deck: "确认阻塞、重新核验、保留未知。没有证据就不叫人工待办。",
   },
   engineering: {
     path: "/engineering",
     title: "工程车间",
     eyebrow: "BUILD / DELIVERY",
-    deck: "仓库、构建、发布和交付。代码不是靠喊口号上线的。",
+    deck: "",
   },
   runtime: {
     path: "/runtime",
@@ -73,6 +81,14 @@ const routes: Record<PageKey, {
   },
 };
 
+// Detail routes own their masthead: a destination, not three tabs inside
+// the generic Engineering page. The factory navigation remains highlighted.
+const engineeringDetailMeta: Record<string, { title: string; eyebrow: string; deck: string }> = {
+  "/engineering/repos": { title: "仓库档案", eyebrow: "ENGINEERING / REPOSITORIES", deck: "" },
+  "/engineering/builds": { title: "近期构建", eyebrow: "ENGINEERING / BUILDS", deck: "" },
+  "/engineering/releases": { title: "Release", eyebrow: "ENGINEERING / RELEASES", deck: "" },
+};
+
 const nav = [
   ["overview", "厂务", Gauge],
   ["engineering", "工程", Wrench],
@@ -82,7 +98,8 @@ const nav = [
 
 function pageKeyForPath(pathname: string): PageKey {
   const normalized = pathname !== "/" ? pathname.replace(/\/+$/, "") : pathname;
-  if (normalized === routes.engineering.path) return "engineering";
+  if (normalized === routes.attention.path) return "attention";
+  if (normalized === routes.engineering.path || normalized.startsWith(routes.engineering.path + "/")) return "engineering";
   if (normalized === routes.runtime.path) return "runtime";
   if (normalized === routes.governance.path) return "governance";
   return "overview";
@@ -96,9 +113,8 @@ function ThemeIcon({ mode }: { mode: ThemeMode }) {
 
 function LoadingPage() {
   return (
-    <section className="page-loading" aria-live="polite">
-      <CircleDot size={15} />
-      Reading Control Room…
+    <section className="page-loading">
+      <TuiLoading title="正在装载 Control Room 界面" detail="正在读取页面模块，不代表后台任务已完成" command="MIRA / LOAD MODULE" />
     </section>
   );
 }
@@ -106,7 +122,7 @@ function LoadingPage() {
 function ControlLayout() {
   const { pathname } = useLocation();
   const page = pageKeyForPath(pathname);
-  const meta = routes[page];
+  const meta = engineeringDetailMeta[pathname.replace(/\/+$/, "")] ?? routes[page];
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem("mira-control-room-theme");
     return saved === "light" || saved === "dark" || saved === "system" ? saved : "dark";
@@ -135,7 +151,7 @@ function ControlLayout() {
           <div className="headline">
             <p className="eyebrow">{meta.eyebrow} / PUBLIC READ</p>
             <h1>{meta.title}</h1>
-            <p className="deck">{meta.deck}</p>
+            {meta.deck && <p className="deck">{meta.deck}</p>}
           </div>
         </div>
         <div className="control-masthead-actions">
@@ -263,7 +279,11 @@ export default function App() {
     <Routes>
       <Route element={<ControlLayout />}>
         <Route index element={<Overview />} />
+        <Route path="attention" element={<AttentionDeskPage />} />
         <Route path="engineering" element={<Engineering />} />
+        <Route path="engineering/repos" element={<Engineering view="repos" />} />
+        <Route path="engineering/builds" element={<Engineering view="builds" />} />
+        <Route path="engineering/releases" element={<Engineering view="releases" />} />
         <Route path="runtime" element={<Runtime />} />
         <Route path="governance" element={<Governance />} />
       </Route>

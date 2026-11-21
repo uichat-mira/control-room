@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildLabel, buildState, filterFleet, summarizeFleet } from "../src/engineering-facts.ts";
+import { buildLabel, buildState, filterFleet, latestBuildRows, latestReleaseRows, summarizeFleet } from "../src/engineering-facts.ts";
 import type { OrganizationRepository, RepositoryWorkflow } from "../src/shared.ts";
 
 const workflow = (
@@ -81,4 +81,41 @@ test("search considers repository name, language, description and default branch
   assert.deepEqual(filterFleet(rows, "PROD", "all").map(r=>r.name), ["cloud"]);
   assert.deepEqual(filterFleet(rows, "go", "all").map(r=>r.name), ["cloud"]);
   assert.deepEqual(filterFleet(rows, "not-found", "all"), []);
+});
+
+test("engineering build route lists only actual latest default-branch Runs and filters raw states", () => {
+  const rows = [
+    repo("none", null),
+    repo("oldsuccess", workflow("completed", "success", "2026-11-18T10:00:00Z")),
+    repo("active", workflow("in_progress", null, "2026-11-21T14:00:00Z")),
+    repo("fail", workflow("completed", "failure", "2026-11-20T14:00:00Z")),
+    repo("action", workflow("completed", "action_required", "2026-11-20T16:00:00Z")),
+    repo("unknown", workflow("completed", null, "2026-11-19T09:00:00Z")),
+  ];
+  assert.deepEqual(latestBuildRows(rows).map(row => row.name),
+    ["active", "action", "fail", "unknown", "oldsuccess"]);
+  assert.deepEqual(latestBuildRows(rows, "failed").map(row => row.name), ["action", "fail"]);
+  assert.deepEqual(latestBuildRows(rows, "running").map(row => row.name), ["active"]);
+  assert.deepEqual(latestBuildRows(rows, "passed").map(row => row.name), ["oldsuccess"]);
+});
+
+test("Release page uses latest discovered tag per repository and sorts by publish time", () => {
+  const rows = [
+    repo("without", null),
+    repo("recent", null, { latestRelease: {
+      tagName: "v2", name: "Second", publishedAt: "2026-11-21T11:00:00Z",
+      htmlUrl: "https://github.com/uichat-mira/recent/releases/tag/v2",
+    }}),
+    repo("undated", null, { latestRelease: {
+      tagName: "v0", name: null, publishedAt: null,
+      htmlUrl: "https://github.com/uichat-mira/undated/releases/tag/v0",
+    }}),
+    repo("older", null, { latestRelease: {
+      tagName: "v1", name: "First", publishedAt: "2026-11-19T11:00:00Z",
+      htmlUrl: "https://github.com/uichat-mira/older/releases/tag/v1",
+    }}),
+  ];
+  assert.deepEqual(latestReleaseRows(rows).map(row => row.name),
+    ["recent", "older", "undated"]);
+  assert.equal(latestReleaseRows(rows)[0].latestRelease?.tagName, "v2");
 });
