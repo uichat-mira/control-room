@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
+import { TuiLoading } from "./TuiLoading";
 import {
-  Activity, ArrowRight, CheckCircle2, CircleDot, Clock3,
+  Activity, ArrowRight, CheckCircle2, Clock3,
   Clapperboard, Cloud, ExternalLink, GitBranch, Radio, ShieldAlert, Eye, RefreshCw,
 } from "lucide-react";
 import type { FactoryFeed } from "./factory-feed";
@@ -184,12 +185,19 @@ export default function Overview() {
   );
   if (!snapshot) {
     return (
-      <section className="page-state control-home-loading" role="status">
-        <CircleDot size={18} />
-        <div>
-          <strong>{summary.error ? "厂务室暂时读不到快照" : "正在核对真实厂务记录"}</strong>
-          <small>{summary.error ?? "GitHub / Cloudflare / Runtime · 不使用演示记录"}</small>
-        </div>
+      <section className="page-state control-home-loading">
+        {summary.error ? (
+          <div role="status">
+            <strong>厂务室暂时读不到快照</strong>
+            <small>{summary.error}</small>
+          </div>
+        ) : (
+          <TuiLoading
+            title="正在核对真实厂务记录"
+            detail="GitHub / Cloudflare / Runtime · 不使用演示记录"
+            command="MIRA / VERIFY FACTS"
+          />
+        )}
       </section>
     );
   }
@@ -329,7 +337,11 @@ export default function Overview() {
               </div>
             </div>
           ))}
-          {!feed && !workers.error && <div className="home-inline-warning">正在读取有界 Worker 列表…</div>}
+          {!feed && !workers.error && (
+            <div className="home-inline-warning">
+              <TuiLoading compact title="正在读取有界 Worker 列表" command="WORKER / DISCOVER" />
+            </div>
+          )}
           <Link to="/factory" className="home-factory-entrance">
             <span><Clapperboard size={19}/> 进入血汗工厂 TV</span><ArrowRight size={17}/>
           </Link>
@@ -433,7 +445,9 @@ export default function Overview() {
               <div><button type="button" onClick={() => setSelection({ ...selection })}><RefreshCw size={13}/> 重新核实</button>
                 <button type="button" onClick={() => { setSelection(null); setInspection(null); }}>关闭</button></div>
             </div>
-            {currentInspection?.loading ? <p>正在读取这一项的可信资格…</p> :
+            {currentInspection?.loading ? (
+              <TuiLoading compact title="正在读取这一项的可信资格" command="EVIDENCE / VERIFY" />
+            ) :
               currentInspection?.error ? <p role="status">暂无法核实：{currentInspection.error}。不计入人工待办。</p> :
               currentInspection?.data && selectedFresh ? (
                 <div>
@@ -503,7 +517,8 @@ export default function Overview() {
         ) : (
           <div className="home-project-missing">
             {projectsReady ? "当前公开数据源未提供可展示的组织 Project。" :
-              governance.data ? "公开 Projects 不可读取；不视为没有项目。" : "正在读取公开组织 Projects…"}
+              governance.data ? "公开 Projects 不可读取；不视为没有项目。" :
+                <TuiLoading compact title="正在读取公开组织 Projects" command="PROJECTS / FETCH" />}
           </div>
         )}
       </section>

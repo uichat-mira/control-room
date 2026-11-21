@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import { TuiLoading } from "./TuiLoading";
 import {
   Link,
   Navigate,
@@ -96,9 +97,8 @@ function ThemeIcon({ mode }: { mode: ThemeMode }) {
 
 function LoadingPage() {
   return (
-    <section className="page-loading" aria-live="polite">
-      <CircleDot size={15} />
-      Reading Control Room…
+    <section className="page-loading">
+      <TuiLoading title="正在装载 Control Room 界面" detail="正在读取页面模块，不代表后台任务已完成" command="MIRA / LOAD MODULE" />
     </section>
   );
 }

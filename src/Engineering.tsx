@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { TuiLoading } from "./TuiLoading";
 import {
   Activity, AlertTriangle, CheckCircle2,
   ChevronDown, Cloud, ExternalLink, GitBranch, Package, Search,
@@ -81,7 +82,9 @@ function Deployments({ deployments, error }: { deployments: DeploymentsPayload |
       </div>
       <p className="ew-section-context">仅展示已纳入 Mira 筛选范围的 Cloudflare Workers / Pages 最新记录；构建、部署记录并不等于真实业务验收。</p>
       {error && <p className="ew-warning" role="status">Cloudflare 交付读取失败：{error}。{deployments ? "展示上一次成功获取的记录。" : "无法确认当前部署状态。"}</p>}
-      {!deployments && !error && <p className="ew-empty">正在读取 Cloudflare 交付记录…</p>}
+      {!deployments && !error && <div className="ew-empty">
+        <TuiLoading compact title="正在读取 Cloudflare 交付记录" command="EDGE / DEPLOYMENTS" />
+      </div>}
       {deployments?.status === "degraded" && <p className="ew-warning">Cloudflare 来源部分可用，以下数量不是完整部署资产总数。</p>}
       {deployments?.status === "unconfigured" && <p className="ew-warning">Cloudflare 读取未配置；未知不等于没有部署。</p>}
       {known && (
@@ -158,10 +161,16 @@ export default function Engineering() {
   if (!reposRead.data && !deployments) {
     return (
       <section className="page-state">
-        <GitBranch size={16} />
-        <div><strong>{reposRead.error || deployRead.error ? "工程记录尚不可用" : "正在查阅工程档案"}</strong>
-          <small>{reposRead.error ?? deployRead.error ?? "GitHub 仓库 / Cloudflare 交付记录加载中。没有使用假数据填充。"}</small>
-        </div>
+        {reposRead.error || deployRead.error ? (
+          <div role="status"><strong>工程记录尚不可用</strong>
+            <small>{reposRead.error ?? deployRead.error}</small></div>
+        ) : (
+          <TuiLoading
+            title="正在查阅工程档案"
+            detail="GitHub 仓库 / Cloudflare 交付记录 · 不使用演示数据"
+            command="WORKSHOP / READ"
+          />
+        )}
       </section>
     );
   }

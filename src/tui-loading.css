@@ -1,0 +1,132 @@
+/* A single visual language for *pending* reads across the four business
+ * departments, System Wall, Factory TV and lazy page navigation.
+ * Indeterminate means no fake progress percentages or time estimates. */
+.tui-loading {
+  --tui-signal: var(--accent, #e56c5d);
+  --tui-dim: var(--text-faint, #869486);
+  --tui-divider: var(--line-soft, #303b32);
+  width: min(100%, 580px);
+  min-width: 0;
+  display: grid;
+  justify-items: start;
+  align-content: center;
+  gap: 9px;
+  padding: 10px 0;
+  color: var(--text-soft, inherit);
+}
+.tui-loading-terminal {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 18px;
+  font: 700 10px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: .09em;
+  color: var(--tui-dim);
+}
+.tui-loading-prompt { color: var(--tui-signal); font-size: 16px; line-height: 1; }
+.tui-loading-command { white-space: nowrap; }
+.tui-spinner {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.3em;
+  height: 1.3em;
+  color: var(--tui-signal, var(--accent, currentColor));
+  font: 750 14px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  vertical-align: -.05em;
+}
+.tui-spinner::before {
+  content: "⠋";
+  animation: tui-spinner-frames .85s steps(1, end) infinite;
+}
+.tui-loading-copy {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+.tui-loading-copy strong {
+  color: var(--text, inherit);
+  font-size: 14px;
+  font-weight: 680;
+  line-height: 1.5;
+}
+.tui-loading-copy small {
+  color: var(--tui-dim);
+  font-size: 11px;
+  line-height: 1.65;
+  font-weight: 450;
+}
+.tui-loading-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  padding-top: 4px;
+  max-width: 100%;
+}
+.tui-loading-track {
+  position: relative;
+  width: clamp(92px, 20vw, 170px);
+  max-width: 47vw;
+  height: 5px;
+  border: 1px solid var(--tui-divider);
+  overflow: hidden;
+}
+.tui-loading-track::after {
+  position: absolute;
+  inset: 1px;
+  background: repeating-linear-gradient(
+    to right, transparent 0, transparent 9px,
+    var(--bg, #090b0e) 9px, var(--bg, #090b0e) 12px
+  );
+  content: "";
+  pointer-events: none;
+}
+.tui-loading-sweep {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 30%;
+  left: -35%;
+  background: var(--tui-signal);
+  animation: tui-scan 1.8s ease-in-out infinite;
+}
+.tui-loading-state {
+  color: var(--tui-dim);
+  font: 700 9px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: .12em;
+}
+.tui-loading-cursor {
+  margin-left: 2px;
+  color: var(--tui-signal);
+  animation: tui-blink 1s steps(1, end) infinite;
+}
+.tui-loading-compact {
+  gap: 5px;
+  padding: 4px 0;
+}
+.tui-loading-compact .tui-loading-copy strong { font-size: 12px; }
+.tui-loading-compact .tui-loading-copy small { font-size: 10px; }
+.tui-loading-compact .tui-loading-track { width: 88px; }
+.tui-loading-compact .tui-loading-activity { padding-top: 1px; }
+
+@keyframes tui-spinner-frames {
+  0% { content: "⠋"; } 12.5% { content: "⠙"; }
+  25% { content: "⠹"; } 37.5% { content: "⠸"; }
+  50% { content: "⠼"; } 62.5% { content: "⠴"; }
+  75% { content: "⠦"; } 87.5% { content: "⠧"; }
+}
+@keyframes tui-scan {
+  0% { left: -35%; } 54% { left: 105%; }
+  100% { left: 105%; }
+}
+@keyframes tui-blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .tui-spinner::before,
+  .tui-loading-sweep,
+  .tui-loading-cursor { animation: none; }
+  .tui-spinner::before { content: "·"; }
+  .tui-loading-sweep { left: 0; }
+  .tui-loading-cursor { opacity: 1; }
+}
