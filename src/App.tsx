@@ -53,7 +53,7 @@ const routes: Record<PageKey, {
     path: "/",
     title: "中央厂务室",
     eyebrow: "MIRA / CENTRAL OFFICE",
-    deck: "今天的生产秩序，由事实与证据负责。",
+    deck: "",
   },
   attention: {
     path: "/attention",
@@ -143,7 +143,7 @@ function ControlLayout() {
           <div className="headline">
             <p className="eyebrow">{meta.eyebrow} / PUBLIC READ</p>
             <h1>{meta.title}</h1>
-            <p className="deck">{meta.deck}</p>
+            {meta.deck && <p className="deck">{meta.deck}</p>}
           </div>
         </div>
         <div className="control-masthead-actions">
