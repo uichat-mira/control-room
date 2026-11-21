@@ -95,6 +95,71 @@ export function openApiDocument(origin: string) {
           responses: { "200": { description: "24-hour requests and errors" } },
         },
       },
+      "/api/v1/github/facts": {
+        get: {
+          tags: ["github"],
+          summary: "Bounded six-repository GitHub raw fact collection",
+          description:
+            "Public-safe raw branch, workflow-run, and open-PR facts for the OPS-033 pilot allowlist. Includes coverage, freshness, rate-limit and per-round request-budget evidence. It does not decide attention or required Gate eligibility.",
+          responses: {
+            "200": {
+              description: "Pilot fact snapshot with explicit coverage gaps",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/GitHubFacts" } } },
+            },
+          },
+        },
+      },
+      "/api/v1/github/gates": {
+        get: {
+          tags: ["github"],
+          summary: "Evidence-anchored Actions Gate and release qualification",
+          description:
+            "Read-only derivation over the exact shared /api/v1/github/facts snapshot. It evaluates applicability by repository, target branch, head SHA, workflow identity, event and run attempt. GitHub required-check configuration is unreadable in this boundary, so required_by_github stays unknown and a workflow outcome is a candidate, not an invented required Gate. Production SHA/smoke stays unverified unless explicit trusted evidence is supplied; a deployment workflow success is not production proof.",
+          responses: {
+            "200": {
+              description: "Gate/release qualification with explicit coverage gaps",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/GitHubGates" } } },
+            },
+          },
+        },
+      },
+      "/api/v1/github/pull": {
+        get: {
+          tags: ["github"],
+          summary: "Single-PR merge-blocker qualification",
+          description:
+            "On-demand, bounded read-only projection of one public pilot PR. It reads the PR detail, its reviews and the workflow runs for the exact head SHA, then classifies needs_attention/in_progress/observed/unknown. Draft and explicitly sourced Hold/dependency evidence stay out of attention. mergeable=null is unknown, not a conflict. Only a current-head maintainer CHANGES_REQUESTED or a proven required-check failure becomes attention; GitHub required-check configuration remains unknown unless trusted evidence is supplied. Labels, comments and ordinary AI review strings are never parsed as hold or review authority.",
+          parameters: [
+            {
+              name: "repository",
+              in: "query",
+              required: true,
+              schema: {
+                type: "string",
+                pattern: "^uichat-mira/(mira-desktop|mira-mobile|cloud-auth|mira-cloud|cloud-pi|control-room)$",
+              },
+            },
+            {
+              name: "number",
+              in: "query",
+              required: true,
+              schema: { type: "integer", minimum: 1 },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Single-PR qualification with explicit coverage and evidence",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/GitHubPullRequest" },
+                },
+              },
+            },
+            "400": { description: "Invalid repository or PR number" },
+            "404": { description: "Repository is outside the six-repository pilot allowlist" },
+          },
+        },
+      },
       "/api/v1/governance": {
         get: {
           tags: ["governance"],
@@ -146,6 +211,47 @@ export function openApiDocument(origin: string) {
             "400": { description: "Invalid query" },
             "404": { description: "Run is not a public Mira External Worker run" },
             "503": { description: "Upstream lifecycle source unavailable" },
+          },
+        },
+      },
+      "/api/v1/factory/attention": {
+        get: {
+          tags: ["runtime"],
+          summary: "Worker escalation attention qualification",
+          description:
+            "Read-only, public-safe qualification of one real External Worker Run. Default is GitHub-only and never queries Workers Observability. A trusted escalated/blocked state requires an open, verified Issue and a complete, bounded, authentic latest same-Issue Recovery Pointer that matches the queried Run/attempt to become needs_attention. A newer indexed same-Issue Run clears the old alert to unknown; the latest Run must be assessed independently. Missing, forged, truncated or stale Recovery/Reporter/Artifact/Issue evidence is unknown, not a Worker failure. Run success and Draft PR delivery are never acceptance or Issue closure. This is an on-demand single-Run read, not an organization-wide outstanding-Worker count.",
+          parameters: [
+            {
+              name: "repository",
+              in: "query",
+              required: true,
+              schema: { type: "string", pattern: "^uichat-mira/[A-Za-z0-9_.-]+$" },
+            },
+            {
+              name: "runId",
+              in: "query",
+              required: true,
+              schema: { type: "integer", minimum: 1 },
+            },
+            {
+              name: "includeReporter",
+              in: "query",
+              required: false,
+              schema: { type: "boolean", default: false },
+              description:
+                "Explicit trusted-Reporter opt-in. Default false stays GitHub-only and cannot prove escalated/blocked terminal states.",
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Worker attention candidate with explicit coverage and evidence",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/FactoryAttention" } },
+              },
+            },
+            "400": { description: "Invalid repository or runId" },
+            "404": { description: "Run is not a public Mira External Worker run" },
+            "503": { description: "Upstream lifecycle or Issue source unavailable" },
           },
         },
       },
@@ -366,6 +472,201 @@ export function openApiDocument(origin: string) {
             cloudflare: { type: "object", additionalProperties: true },
             deployedCommit: nullableString,
             error: { type: "string" },
+          },
+        },
+        GitHubFacts: {
+          type: "object",
+          required: [
+            "apiVersion", "source", "generatedAt", "status", "authentication",
+            "freshness", "scope", "budget", "coverage", "rateLimit", "repositories",
+            "warnings",
+          ],
+          properties: {
+            apiVersion: { const: "v1" },
+            source: { const: "github-rest" },
+            generatedAt: { type: "string", format: "date-time" },
+            status: { enum: ["complete", "partial", "unavailable"] },
+            authentication: {
+              type: "object",
+              required: ["mode", "credentialPresent", "note"],
+              properties: {
+                mode: { enum: ["authenticated", "anonymous"] },
+                credentialPresent: { type: "boolean" },
+                note: { type: "string" },
+              },
+            },
+            freshness: {
+              type: "object",
+              required: ["observedAt", "maxAgeSeconds", "ageSeconds", "state"],
+              properties: {
+                observedAt: { type: "string", format: "date-time" },
+                maxAgeSeconds: { type: "integer", minimum: 1 },
+                ageSeconds: { type: "integer", minimum: 0 },
+                state: { enum: ["fresh", "stale"] },
+              },
+            },
+            scope: { type: "object", additionalProperties: true },
+            budget: { type: "object", additionalProperties: true },
+            coverage: { type: "object", additionalProperties: true },
+            rateLimit: { type: "object", additionalProperties: true },
+            repositories: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
+            warnings: { type: "array", items: { type: "string" } },
+            error: { type: "string" },
+          },
+        },
+        GitHubGates: {
+          type: "object",
+          required: [
+            "apiVersion", "source", "generatedAt", "factsGeneratedAt", "factsStatus",
+            "requiredCheckEvidence", "productionEvidence", "coverage", "repositories",
+            "candidates", "warnings",
+          ],
+          properties: {
+            apiVersion: { const: "v1" },
+            source: { const: "github-facts-derivation" },
+            generatedAt: { type: "string", format: "date-time" },
+            factsGeneratedAt: { type: "string", format: "date-time" },
+            factsStatus: { enum: ["complete", "partial", "unavailable"] },
+            requiredCheckEvidence: { enum: ["unavailable", "supplied"] },
+            productionEvidence: { enum: ["unavailable", "supplied", "partial"] },
+            coverage: { type: "object", additionalProperties: true },
+            repositories: { type: "array", items: { type: "object", additionalProperties: true } },
+            candidates: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "id", "category", "classification", "priority", "who", "what",
+                  "whyNow", "nextStep", "evidence", "observedAt", "exitCondition",
+                ],
+                properties: {
+                  id: { type: "string" },
+                  category: { enum: ["actions_gate", "deployment"] },
+                  classification: { enum: ["attention", "in_progress", "unknown", "observation"] },
+                  priority: { enum: ["P0", "P1", "P2", "P3", null] },
+                  who: { type: "string" },
+                  what: { type: "string" },
+                  whyNow: { type: "string" },
+                  nextStep: { type: "string" },
+                  evidence: { type: "array", items: { type: "object", additionalProperties: true } },
+                  observedAt: { type: ["string", "null"], format: "date-time" },
+                  exitCondition: { type: "string" },
+                },
+              },
+            },
+            warnings: { type: "array", items: { type: "string" } },
+          },
+        },
+        GitHubPullRequest: {
+          type: "object",
+          required: [
+            "apiVersion", "source", "generatedAt", "factsGeneratedAt", "factsStatus",
+            "id", "repository", "number", "status", "classification", "priority",
+            "who", "what", "whyNow", "nextStep", "evidence", "observedAt",
+            "exitCondition", "review", "checks", "hold", "signals", "coverage",
+            "warnings",
+          ],
+          properties: {
+            apiVersion: { const: "v1" },
+            source: { const: "github-pr-derivation" },
+            generatedAt: { type: "string", format: "date-time" },
+            factsGeneratedAt: { type: "string", format: "date-time" },
+            factsStatus: { enum: ["complete", "partial", "unavailable"] },
+            id: { type: "string", pattern: "^pr:uichat-mira/[A-Za-z0-9_.-]+#[0-9]+$" },
+            repository: { type: "string" },
+            number: { type: "integer", minimum: 1 },
+            status: { enum: ["needs_attention", "in_progress", "observed", "unknown"] },
+            classification: { enum: ["attention", "in_progress", "unknown", "observation"] },
+            priority: { enum: ["P0", "P1", "P2", "P3", null] },
+            who: { type: "string" },
+            what: { type: "string" },
+            whyNow: { type: "string" },
+            nextStep: { type: "string" },
+            evidence: { type: "array", items: { type: "object", additionalProperties: true } },
+            observedAt: { type: ["string", "null"], format: "date-time" },
+            exitCondition: { type: "string" },
+            state: { type: ["string", "null"] },
+            draft: { type: ["boolean", "null"] },
+            merged: { type: ["boolean", "null"] },
+            baseRef: { type: ["string", "null"] },
+            headSha: { type: ["string", "null"] },
+            mergeable: { type: ["boolean", "null"] },
+            mergeableState: { type: ["string", "null"] },
+            review: { type: "object", additionalProperties: true },
+            checks: { type: "object", additionalProperties: true },
+            hold: { type: "object", additionalProperties: true },
+            signals: { type: "array", items: { type: "object", additionalProperties: true } },
+            coverage: { type: "object", additionalProperties: true },
+            warnings: { type: "array", items: { type: "string" } },
+          },
+        },
+        FactoryAttention: {
+          type: "object",
+          required: [
+            "apiVersion", "source", "id", "category", "status", "classification",
+            "priority", "who", "what", "whyNow", "whatSystemTried", "nextStep",
+            "evidence", "observedAt", "exitCondition", "identity", "state",
+            "repairRound", "freshness", "reporter", "issue", "signals", "coverage",
+            "currentness", "warnings",
+          ],
+          properties: {
+            apiVersion: { const: "v1" },
+            source: { const: "factory-attention-derivation" },
+            id: { type: "string", pattern: "^worker:uichat-mira/" },
+            category: { const: "worker_escalation" },
+            status: { enum: ["needs_attention", "in_progress", "observed", "unknown"] },
+            classification: { enum: ["attention", "in_progress", "observation", "unknown"] },
+            priority: { enum: ["P0", "P1", "P2", "P3", null] },
+            who: { type: "string" },
+            what: { type: "string" },
+            whyNow: { type: "string" },
+            whatSystemTried: { type: "string" },
+            nextStep: { type: "string" },
+            evidence: { type: "array", items: { type: "object", additionalProperties: true } },
+            observedAt: { type: ["string", "null"], format: "date-time" },
+            exitCondition: { type: "string" },
+            identity: {
+              type: "object",
+              required: [
+                "repository", "issueNumber", "issueUrl", "issueLinkSource",
+                "runId", "attempt", "runUrl", "candidateArtifact",
+              ],
+              properties: {
+                repository: { type: "string" },
+                issueNumber: { type: ["integer", "null"], minimum: 1 },
+                issueUrl: { type: ["string", "null"] },
+                issueLinkSource: { enum: ["trusted-reporter", "trusted-issue-evidence", null] },
+                runId: { type: "integer", minimum: 1 },
+                attempt: { type: "integer", minimum: 1 },
+                runUrl: { type: "string" },
+                candidateArtifact: { type: ["object", "null"], additionalProperties: true },
+              },
+            },
+            state: { type: "string" },
+            repairRound: { type: ["integer", "null"] },
+            freshness: { enum: ["fresh", "stale", "expired", "unavailable"] },
+            reporter: { type: "object", additionalProperties: true },
+            issue: { type: "object", additionalProperties: true },
+            signals: { type: "array", items: { type: "object", additionalProperties: true } },
+            coverage: { type: "object", additionalProperties: true },
+            currentness: {
+              type: "object",
+              required: ["status", "observedAt", "evidenceUrl", "latestRunId", "latestAttempt", "reason"],
+              properties: {
+                status: { enum: ["confirmed_current", "superseded", "unknown"] },
+                observedAt: { type: ["string", "null"] },
+                evidenceUrl: { type: ["string", "null"] },
+                latestRunId: { type: ["integer", "null"] },
+                latestAttempt: { type: ["integer", "null"] },
+                reason: { type: "string" },
+              },
+            },
+            warnings: { type: "array", items: { type: "string" } },
+            scope: { type: "object", additionalProperties: true },
+            budget: { type: "object", additionalProperties: true },
           },
         },
         RepositoryList: {

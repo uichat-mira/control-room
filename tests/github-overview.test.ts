@@ -135,7 +135,7 @@ test("renders a self-contained GitHub overview SVG", () => {
   assert.match(svg, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
   assert.match(svg, /Mira Control Room/);
   assert.match(svg, /3<\/text>/);
-  assert.match(svg, /1\/2 green/);
+  assert.match(svg, /1\/2 success/);
   assert.match(svg, /2\/2 online/);
   assert.match(svg, /GitHub connected/);
   assert.match(svg, /Cloudflare connected/);

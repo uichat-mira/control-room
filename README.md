@@ -12,7 +12,7 @@ Canonical production domain: `https://control.mira.tomz.io`
 - Shallow domain navigation for Overview, Engineering, Runtime, and Governance
 - Cloudflare Worker API + Workers Static Assets
 - Live GitHub organization repository data
-- Latest default-branch GitHub Actions run per repository
+- Latest default-branch GitHub Actions run per repository (raw archive fact, not Gate health)
 - Latest GitHub Release per repository
 - Live HTTP probes for Mira Website, Relay, and Control Room
 - Cloudflare Workers / Pages deployment read model
@@ -40,8 +40,12 @@ Control Room exposes a versioned, read-only, public-safe API. It only projects p
 - `GET /api/v1/analytics` — Workers last-24h requests and errors
 - `GET /api/v1/governance` — Issues / PR / branch protection / rulesets / Projects
 - `GET /api/v1/projects` — public GitHub Projects
+- `GET /api/v1/github/facts` — bounded six-repository raw branch / workflow-run / open-PR facts with explicit coverage, freshness, rate-limit and per-round request-budget evidence
+- `GET /api/v1/github/gates` — evidence-anchored Gate / release / production-version qualification derived from the same cached facts round with no extra GitHub reads
+- `GET /api/v1/github/pull?repository=...&number=...` — on-demand single-PR merge-blocker qualification with Draft/Hold suppression, current-head review checks, real mergeability and bounded head workflow runs
 - `GET /api/v1/factory/runs` — bounded, cached real External Worker discovery across public organization repositories (GitHub Actions only; no Workers Logs scan)
 - `GET /api/v1/factory/run?repository=...&runId=...` — sanitized real External Worker lifecycle projection; `includeReporter=false` avoids Workers Logs for GitHub-only details
+- `GET /api/v1/factory/attention?repository=...&runId=...` — read-only Worker escalation attention qualification; GitHub-only by default, with a trusted escalated/blocked state, verified Issue and readable open Issue required before it becomes `needs_attention`
 - `GET /openapi.json` — OpenAPI 3.1 contract
 - `GET /docs` — human-readable API/MCP documentation
 
@@ -59,7 +63,7 @@ Control Room exposes a compact SVG projection intended for the Mira GitHub Organ
 https://control.mira.tomz.io/embed/github-overview.svg
 ```
 
-The image reuses the existing `/api/v1/summary` read model. It does not introduce a second collector or status store. It currently projects organization status, repository count, latest CI health, service health, GitHub/Cloudflare source state, and snapshot time.
+The image reuses the existing `/api/v1/summary` read model. It does not introduce a second collector or status store. It currently projects organization status, repository count, the latest Run records (not necessary-Gate or production health), service health, GitHub/Cloudflare source state, and snapshot time.
 
 The embed is public and cacheable. It deliberately stays outside the per-client Public API rate-limit bucket because GitHub may fetch external images through shared proxy addresses; a short Worker edge cache prevents repeated organization and service probes from direct image requests.
 
@@ -109,6 +113,14 @@ Only Cloudflare resources whose names contain `mira` or `uichat` are exposed by 
 ## GitHub read model
 
 The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the Worker runtime as the internal binding `GITHUB_READ_TOKEN`. The public API deliberately requests only public repositories even if the credential itself can read more.
+
+`/api/v1/github/facts` is the bounded raw-fact input for the OPS-033 pilot repositories (`mira-desktop`, `mira-mobile`, `cloud-auth`, `mira-cloud`, `cloud-pi`, `control-room`). One shared snapshot reads branch refs, explicit workflow runs, and open PRs from a six-repository allowlist, then reports observed / missing / inaccessible / rate-limited / timed-out / truncated / budget-skipped sources separately. Repositories outside the allowlist are explicitly unknown, not healthy. The Worker keeps one shared snapshot for an hour and does not change the existing overview, Factory TV, or MCP semantics. See [`docs/github-attention-facts.md`](docs/github-attention-facts.md).
+
+`/api/v1/github/gates` derives Gate/release qualification from that exact snapshot. It evaluates applicability by repository, current branch/SHA, workflow identity, event and run attempt; excludes `issue_comment` Worker dispatch Runs; distinguishes retries, old SHAs, neutral/cancelled/skipped, `action_required`, and truncated windows; and keeps a deploy workflow success separate from a verified production SHA/smoke. GitHub required checks are currently unreadable, so `required_by_github` is `unknown` rather than invented. These reads add no GitHub requests; see [`docs/github-attention-gate-status.md`](docs/github-attention-gate-status.md).
+
+`/api/v1/github/pull` is a separate on-demand single-PR read, not a homepage fan-out. It makes three bounded public reads (PR detail, reviews, head workflow runs), caches the result for 60 seconds, and reuses the OPS-035 workflow assessment instead of inventing a second required-check rule set. Draft and explicitly sourced Hold/dependency evidence stay out of human attention; `mergeable=null` is `unknown`, not a conflict; a `CHANGES_REQUESTED` is attention only on the current head by a maintainer reviewer. Labels, comments and ordinary AI review strings never grant hold or review authority. See [`docs/github-attention-pr-status.md`](docs/github-attention-pr-status.md).
+
+`/api/v1/factory/attention` reuses the canonical OPS-032 Factory projection instead of copying its lifecycle state machine. It is GitHub-only by default; only an explicit `includeReporter=true` can expose a trusted `escalated`/`blocked` event. Such a state becomes `needs_attention` only with a verified Issue link (never guessed from free text) and a readable open Issue. When supplied together, a newer same-Issue Run/attempt supersedes the old one, and legitimate Issue closure clears the old alert; an unrelated successful Run does not. It adds at most one bounded, cached Issue-state read and never scans Factory Feed or Workers Observability by default. See [`docs/github-attention-worker-status.md`](docs/github-attention-worker-status.md).
 
 ## Views
 

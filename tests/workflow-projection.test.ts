@@ -50,7 +50,7 @@ test("System Wall preserves the Engineering state classification for every meani
   assert.equal(workflowText(run(null, "in_progress")), "Running");
 });
 
-test("Overview distinguishes action_required from failure and excludes unknown from attention", () => {
+test("Overview does not promote a raw latest Run failure/action into a necessary-Gate incident", () => {
   const entries = collectAttention([
     repo("missing", run(null)),
     repo("stale", run("stale")),
@@ -59,12 +59,7 @@ test("Overview distinguishes action_required from failure and excludes unknown f
     repo("cancelled", run("cancelled")),
     repo("queued", run(null, "queued")),
   ], [], []);
-  assert.equal(entries.length, 2);
-  assert.deepEqual(entries.map(item => [item.name, item.severity]), [
-    ["failed", "failure"],
-    ["action", "warning"],
-  ]);
-  assert.equal(entries.filter(item => item.category === "build" && item.severity === "failure").length, 1);
-  assert.match(entries[1].explanation, /需要人工操作/);
-  assert.equal(entries[1].href, "https://github.com/uichat-mira/control-room/actions/runs/123");
+  // The raw Run remains available to Engineering/Wall, but the Overview
+  // attention projection cannot infer required Gate or production impact.
+  assert.deepEqual(entries, []);
 });
