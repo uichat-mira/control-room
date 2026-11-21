@@ -10,7 +10,7 @@
 .home-brief {
   position: relative;
   overflow: hidden;
-  background: var(--surface);
+  background: transparent;
   border-left: 3px solid var(--line);
   padding: 15px 18px 0;
 }
@@ -71,7 +71,7 @@
   align-items: flex-start;
   gap: 9px;
   color: var(--warn);
-  background: var(--accent-soft);
+  background: transparent;
   border-left: 2px solid var(--warn);
   margin-top: 12px;
   padding: 9px 12px;
@@ -200,7 +200,7 @@
   min-height: 49px;
   padding: 0 15px;
   border: 1px solid var(--accent);
-  background: var(--accent-soft);
+  background: transparent;
   color: var(--text);
   font-size: 12px;
   font-weight: 750;
@@ -257,7 +257,7 @@
   margin-top: 35px;
   padding: 17px 20px 19px;
   border-top: 2px solid var(--accent);
-  background: var(--surface-soft);
+  background: transparent;
 }
 .home-editorial > div { display: flex; gap: 14px; align-items: center; }
 .home-editorial > div span { font: 700 10px/1.5 ui-monospace, Menlo, monospace; letter-spacing: .08em; color: var(--accent); }
@@ -310,7 +310,9 @@
   .home-section-title > strong { max-width: 125px; text-align: right; white-space: normal; }
 }
 
-/* OPS-038 — Evidence-first attention center. This is a presentation of the
+/* OPS-038 — Evidence-first attention center. Solid fills are reserved for
+ * interaction/hover, so the main overview keeps one uninterrupted page ground.
+ * This is a presentation of the
  * qualified upstream sources, NOT a local task-state system. */
 .home-attention-context {
   display: grid;
@@ -345,7 +347,7 @@
   border: 1px solid var(--line);
   border-left: 3px solid var(--text-faint);
   margin-bottom: 10px;
-  background: var(--surface);
+  background: transparent;
   overflow-wrap: anywhere;
 }
 .home-decision.attention { border-left-color: var(--danger); }
@@ -441,7 +443,7 @@
   gap: 6px;
   color: var(--accent);
   border: 1px solid var(--line);
-  background: var(--surface);
+  background: transparent;
   cursor: pointer;
   min-height: 32px;
   padding: 5px 10px;
@@ -450,7 +452,7 @@
 .home-pr-row button:hover, .home-inspection button:hover { border-color: var(--accent); background: var(--hover); }
 .home-inspection {
   border-left: 3px solid var(--accent);
-  background: var(--surface-soft);
+  background: transparent;
   margin-top: 14px;
   padding: 13px;
   overflow-wrap: anywhere;
