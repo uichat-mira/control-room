@@ -219,7 +219,7 @@ export function openApiDocument(origin: string) {
           tags: ["runtime"],
           summary: "Worker escalation attention qualification",
           description:
-            "Read-only, public-safe qualification of one real External Worker Run. Default is GitHub-only and never queries Workers Observability. A trusted escalated/blocked state needs a verified Issue link plus a readable open Issue to become needs_attention; a closed Issue or a newer same-Issue Run clears it. Missing Reporter/Artifact/Issue evidence is unknown, not a Worker failure. Run success and Draft PR delivery are never acceptance or Issue closure. This is an on-demand single-Run read, not an organization-wide outstanding-Worker count.",
+            "Read-only, public-safe qualification of one real External Worker Run. Default is GitHub-only and never queries Workers Observability. A trusted escalated/blocked state requires an open, verified Issue and a complete, bounded, authentic latest same-Issue Recovery Pointer that matches the queried Run/attempt to become needs_attention. A newer indexed same-Issue Run clears the old alert to unknown; the latest Run must be assessed independently. Missing, forged, truncated or stale Recovery/Reporter/Artifact/Issue evidence is unknown, not a Worker failure. Run success and Draft PR delivery are never acceptance or Issue closure. This is an on-demand single-Run read, not an organization-wide outstanding-Worker count.",
           parameters: [
             {
               name: "repository",
@@ -610,7 +610,7 @@ export function openApiDocument(origin: string) {
             "priority", "who", "what", "whyNow", "whatSystemTried", "nextStep",
             "evidence", "observedAt", "exitCondition", "identity", "state",
             "repairRound", "freshness", "reporter", "issue", "signals", "coverage",
-            "warnings",
+            "currentness", "warnings",
           ],
           properties: {
             apiVersion: { const: "v1" },
@@ -652,6 +652,18 @@ export function openApiDocument(origin: string) {
             issue: { type: "object", additionalProperties: true },
             signals: { type: "array", items: { type: "object", additionalProperties: true } },
             coverage: { type: "object", additionalProperties: true },
+            currentness: {
+              type: "object",
+              required: ["status", "observedAt", "evidenceUrl", "latestRunId", "latestAttempt", "reason"],
+              properties: {
+                status: { enum: ["confirmed_current", "superseded", "unknown"] },
+                observedAt: { type: ["string", "null"] },
+                evidenceUrl: { type: ["string", "null"] },
+                latestRunId: { type: ["integer", "null"] },
+                latestAttempt: { type: ["integer", "null"] },
+                reason: { type: "string" },
+              },
+            },
             warnings: { type: "array", items: { type: "string" } },
             scope: { type: "object", additionalProperties: true },
             budget: { type: "object", additionalProperties: true },
