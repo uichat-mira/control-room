@@ -24,7 +24,7 @@ Canonical production domain: `https://control.mira.tomz.io`
 - Cache-friendly GitHub Organization overview SVG at `/embed/github-overview.svg`
 - `/wall` large-screen mode with 60-second refresh
 
-GitHub, Cloudflare, governance, and runtime health are intentionally separate read paths. Focused Public API, MCP, and domain UI reads do not trigger unrelated service probes. Overview is the deliberate cross-domain exception because its job is to answer what needs attention now.
+GitHub, Cloudflare, governance, and runtime health are intentionally separate read paths. Focused Public API, MCP, and domain UI reads do not trigger unrelated service probes. Overview is an entrance dashboard: it shows a small set of qualified, bounded cross-domain signals and links to the actual business areas. Detailed PR/Worker evidence workflows live at /attention; the homepage does not duplicate those inspections.
 
 ## Public API v1
 
@@ -120,12 +120,18 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 
 `/api/v1/github/pull` is a separate on-demand single-PR read, not a homepage fan-out. It makes three bounded public reads (PR detail, reviews, head workflow runs), caches the result for 60 seconds, and reuses the OPS-035 workflow assessment instead of inventing a second required-check rule set. Draft and explicitly sourced Hold/dependency evidence stay out of human attention; `mergeable=null` is `unknown`, not a conflict; a `CHANGES_REQUESTED` is attention only on the current head by a maintainer reviewer. Labels, comments and ordinary AI review strings never grant hold or review authority. See [`docs/github-attention-pr-status.md`](docs/github-attention-pr-status.md).
 
-`/api/v1/factory/attention` reuses the canonical OPS-032 Factory projection instead of copying its lifecycle state machine. It is GitHub-only by default; only an explicit `includeReporter=true` can expose a trusted `escalated`/`blocked` event. Such a state becomes `needs_attention` only with a verified Issue link (never guessed from free text) and a readable open Issue. When supplied together, a newer same-Issue Run/attempt supersedes the old one, and legitimate Issue closure clears the old alert; an unrelated successful Run does not. It adds at most one bounded, cached Issue-state read and never scans Factory Feed or Workers Observability by default. See [`docs/github-attention-worker-status.md`](docs/github-attention-worker-status.md).
+`/api/v1/factory/attention` reuses the canonical OPS-032 Factory projection. A trusted terminal Worker event is promoted to human attention only when the owning Issue is verifiably open and a bounded, authentic latest same-Issue Recovery Pointer proves that exact Run/attempt remains current. Later same-Issue pointers clear old alerts; missing, truncated or forged evidence remains unknown. The default is GitHub-only with no Reporter log query. Explicit Reporter inspection may add cached, bounded Issue and comment-page reads; there is no automatic organization-wide Worker scan. See [Worker attention contract](docs/github-attention-worker-status.md).
 
 ## Views
 
-- `/` — Overview: cross-domain summary, current exceptions, and the active public Project
-- `/engineering` — repositories, latest default-branch builds, releases, Workers, and Pages delivery
+**Homepage design contract:** Entrance first, status second, details on their own routes. The Central Office dashboard is a compact map to departments and specialized consoles, not an elongated report or an independent source of eligibility truth. Every indicator links to its owning view; unknown sources must never be rendered as global zero-risk claims.
+
+- `/` — Central Office: entry dashboard with bounded signals and direct links to Engineering, Runtime, Governance, Attention, Factory TV and System Wall; no global exact todo count.
+- `/attention` — Attention & Evidence: qualified need-attention / in-progress / observation / unknown records, source coverage and deliberate single-PR / Worker inspections (OPS-038).
+- `/engineering` — GitHub engineering entry dashboard: repository, build, Release
+- `/engineering/repos` — searchable repository archive with GitHub Run / Release links
+- `/engineering/builds` — one most recent default-branch Run per repository, not build history
+- `/engineering/releases` — one latest discovered GitHub Release per repository, not version history
 - `/runtime` — live service probes, Workers, Pages, and 24-hour traffic/error analytics
 - `/governance` — Issues, pull requests, default-branch protection, rulesets, and public Projects
 - `/wall` — large-screen operations view; forced dark theme and 60-second refresh

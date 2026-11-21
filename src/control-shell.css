@@ -1,6 +1,5 @@
 /* CTRL-UI-01: mobile-first shared business shell; standalone Wall and Factory TV are untouched. */
 .control-shell {
-  --bg: #111612;
   --surface: #1a211b;
   --surface-soft: #202821;
   --text: #eeeadd;
@@ -21,7 +20,6 @@
 }
 
 :root[data-theme="light"] .control-shell {
-  --bg: #f3f0e8;
   --surface: #fdfbf5;
   --surface-soft: #eae7dc;
   --text: #222922;
@@ -39,7 +37,6 @@
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) .control-shell {
-    --bg: #f3f0e8;
     --surface: #fdfbf5;
     --surface-soft: #eae7dc;
     --text: #222922;

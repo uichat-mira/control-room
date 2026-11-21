@@ -66,3 +66,37 @@ export function filterFleet(
         a.name.localeCompare(b.name);
     });
 }
+
+/** One observed latest default-branch Run per repository, not build history. */
+export function latestBuildRows(
+  repositories: OrganizationRepository[],
+  filter: "all" | "running" | "failed" | "passed" = "all",
+): OrganizationRepository[] {
+  return repositories
+    .filter(repo => {
+      if (!repo.latestWorkflow) return false;
+      const state = buildState(repo.latestWorkflow);
+      if (filter === "running") return state === "running";
+      if (filter === "failed") return state === "failed" || state === "action";
+      if (filter === "passed") return state === "passed";
+      return true;
+    })
+    .sort((a, b) =>
+      Date.parse(b.latestWorkflow!.updatedAt) - Date.parse(a.latestWorkflow!.updatedAt) ||
+      a.name.localeCompare(b.name),
+    );
+}
+
+/** Only the latest discovered published Release per repository. */
+export function latestReleaseRows(repositories: OrganizationRepository[]): OrganizationRepository[] {
+  const publishedTime = (value: string | null) => {
+    const stamp = Date.parse(value ?? "");
+    return Number.isFinite(stamp) ? stamp : 0;
+  };
+  return repositories
+    .filter(repo => repo.latestRelease !== null)
+    .sort((a, b) =>
+      publishedTime(b.latestRelease!.publishedAt) - publishedTime(a.latestRelease!.publishedAt) ||
+      a.name.localeCompare(b.name),
+    );
+}

@@ -18,11 +18,13 @@
     "test:runtime": "node --test tests/runtime-facts.test.ts",
     "test:governance": "node --test tests/governance-facts.test.ts",
     "test:workflow": "node --test tests/workflow-projection.test.ts",
-    "check": "npm run typecheck && npm run test:overview && npm run test:engineering && npm run test:runtime && npm run test:governance && npm run test:workflow && npm run test:factory && npm run test:github-snapshot && npm run test:github-facts && npm run test:github-gates && npm run test:github-pr && npm run build",
+    "check": "npm run typecheck && npm run test:overview && npm run test:attention && npm run test:dashboard && npm run test:engineering && npm run test:runtime && npm run test:governance && npm run test:workflow && npm run test:factory && npm run test:github-snapshot && npm run test:github-facts && npm run test:github-gates && npm run test:github-pr && npm run build",
     "test:github-snapshot": "node --test tests/github-snapshot.test.ts",
     "test:github-facts": "node --test tests/github-facts.test.ts tests/worker-github-facts-route.test.ts",
     "test:github-gates": "node --test tests/github-gate-facts.test.ts",
-    "test:github-pr": "node --test tests/github-pr-facts.test.ts tests/github-pr-qualification.test.ts tests/worker-github-pr-route.test.ts"
+    "test:github-pr": "node --test tests/github-pr-facts.test.ts tests/github-pr-qualification.test.ts tests/worker-github-pr-route.test.ts",
+    "test:attention": "node --test tests/attention-center.test.ts",
+    "test:dashboard": "node --test tests/dashboard-model.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
