@@ -6,7 +6,8 @@
 > GitHub reads (see [`github-attention-gate-status.md`](github-attention-gate-status.md));
 > single-PR merge-blocker qualification is implemented by OPS-036 at
 > [`github-attention-pr-status.md`](github-attention-pr-status.md) using bounded
-> on-demand PR detail reads. Worker judgment stays with OPS-037, and the Overview
+> on-demand PR detail reads. Worker judgment stays with OPS-037
+> ([`github-attention-worker-status.md`](github-attention-worker-status.md)), and the Overview
 > redesign stays with OPS-038.
 
 ## Scope
