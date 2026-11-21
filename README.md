@@ -45,6 +45,7 @@ Control Room exposes a versioned, read-only, public-safe API. It only projects p
 - `GET /api/v1/github/pull?repository=...&number=...` — on-demand single-PR merge-blocker qualification with Draft/Hold suppression, current-head review checks, real mergeability and bounded head workflow runs
 - `GET /api/v1/factory/runs` — bounded, cached real External Worker discovery across public organization repositories (GitHub Actions only; no Workers Logs scan)
 - `GET /api/v1/factory/run?repository=...&runId=...` — sanitized real External Worker lifecycle projection; `includeReporter=false` avoids Workers Logs for GitHub-only details
+- `GET /api/v1/factory/attention?repository=...&runId=...` — read-only Worker escalation attention qualification; GitHub-only by default, with a trusted escalated/blocked state, verified Issue and readable open Issue required before it becomes `needs_attention`
 - `GET /openapi.json` — OpenAPI 3.1 contract
 - `GET /docs` — human-readable API/MCP documentation
 
@@ -118,6 +119,8 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 `/api/v1/github/gates` derives Gate/release qualification from that exact snapshot. It evaluates applicability by repository, current branch/SHA, workflow identity, event and run attempt; excludes `issue_comment` Worker dispatch Runs; distinguishes retries, old SHAs, neutral/cancelled/skipped, `action_required`, and truncated windows; and keeps a deploy workflow success separate from a verified production SHA/smoke. GitHub required checks are currently unreadable, so `required_by_github` is `unknown` rather than invented. These reads add no GitHub requests; see [`docs/github-attention-gate-status.md`](docs/github-attention-gate-status.md).
 
 `/api/v1/github/pull` is a separate on-demand single-PR read, not a homepage fan-out. It makes three bounded public reads (PR detail, reviews, head workflow runs), caches the result for 60 seconds, and reuses the OPS-035 workflow assessment instead of inventing a second required-check rule set. Draft and explicitly sourced Hold/dependency evidence stay out of human attention; `mergeable=null` is `unknown`, not a conflict; a `CHANGES_REQUESTED` is attention only on the current head by a maintainer reviewer. Labels, comments and ordinary AI review strings never grant hold or review authority. See [`docs/github-attention-pr-status.md`](docs/github-attention-pr-status.md).
+
+`/api/v1/factory/attention` reuses the canonical OPS-032 Factory projection instead of copying its lifecycle state machine. It is GitHub-only by default; only an explicit `includeReporter=true` can expose a trusted `escalated`/`blocked` event. Such a state becomes `needs_attention` only with a verified Issue link (never guessed from free text) and a readable open Issue. When supplied together, a newer same-Issue Run/attempt supersedes the old one, and legitimate Issue closure clears the old alert; an unrelated successful Run does not. It adds at most one bounded, cached Issue-state read and never scans Factory Feed or Workers Observability by default. See [`docs/github-attention-worker-status.md`](docs/github-attention-worker-status.md).
 
 ## Views
 

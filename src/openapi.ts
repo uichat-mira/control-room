@@ -214,6 +214,47 @@ export function openApiDocument(origin: string) {
           },
         },
       },
+      "/api/v1/factory/attention": {
+        get: {
+          tags: ["runtime"],
+          summary: "Worker escalation attention qualification",
+          description:
+            "Read-only, public-safe qualification of one real External Worker Run. Default is GitHub-only and never queries Workers Observability. A trusted escalated/blocked state needs a verified Issue link plus a readable open Issue to become needs_attention; a closed Issue or a newer same-Issue Run clears it. Missing Reporter/Artifact/Issue evidence is unknown, not a Worker failure. Run success and Draft PR delivery are never acceptance or Issue closure. This is an on-demand single-Run read, not an organization-wide outstanding-Worker count.",
+          parameters: [
+            {
+              name: "repository",
+              in: "query",
+              required: true,
+              schema: { type: "string", pattern: "^uichat-mira/[A-Za-z0-9_.-]+$" },
+            },
+            {
+              name: "runId",
+              in: "query",
+              required: true,
+              schema: { type: "integer", minimum: 1 },
+            },
+            {
+              name: "includeReporter",
+              in: "query",
+              required: false,
+              schema: { type: "boolean", default: false },
+              description:
+                "Explicit trusted-Reporter opt-in. Default false stays GitHub-only and cannot prove escalated/blocked terminal states.",
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Worker attention candidate with explicit coverage and evidence",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/FactoryAttention" } },
+              },
+            },
+            "400": { description: "Invalid repository or runId" },
+            "404": { description: "Run is not a public Mira External Worker run" },
+            "503": { description: "Upstream lifecycle or Issue source unavailable" },
+          },
+        },
+      },
       "/api/v1/projects": {
         get: {
           tags: ["governance"],
@@ -560,6 +601,60 @@ export function openApiDocument(origin: string) {
             signals: { type: "array", items: { type: "object", additionalProperties: true } },
             coverage: { type: "object", additionalProperties: true },
             warnings: { type: "array", items: { type: "string" } },
+          },
+        },
+        FactoryAttention: {
+          type: "object",
+          required: [
+            "apiVersion", "source", "id", "category", "status", "classification",
+            "priority", "who", "what", "whyNow", "whatSystemTried", "nextStep",
+            "evidence", "observedAt", "exitCondition", "identity", "state",
+            "repairRound", "freshness", "reporter", "issue", "signals", "coverage",
+            "warnings",
+          ],
+          properties: {
+            apiVersion: { const: "v1" },
+            source: { const: "factory-attention-derivation" },
+            id: { type: "string", pattern: "^worker:uichat-mira/" },
+            category: { const: "worker_escalation" },
+            status: { enum: ["needs_attention", "in_progress", "observed", "unknown"] },
+            classification: { enum: ["attention", "in_progress", "observation", "unknown"] },
+            priority: { enum: ["P0", "P1", "P2", "P3", null] },
+            who: { type: "string" },
+            what: { type: "string" },
+            whyNow: { type: "string" },
+            whatSystemTried: { type: "string" },
+            nextStep: { type: "string" },
+            evidence: { type: "array", items: { type: "object", additionalProperties: true } },
+            observedAt: { type: ["string", "null"], format: "date-time" },
+            exitCondition: { type: "string" },
+            identity: {
+              type: "object",
+              required: [
+                "repository", "issueNumber", "issueUrl", "issueLinkSource",
+                "runId", "attempt", "runUrl", "candidateArtifact",
+              ],
+              properties: {
+                repository: { type: "string" },
+                issueNumber: { type: ["integer", "null"], minimum: 1 },
+                issueUrl: { type: ["string", "null"] },
+                issueLinkSource: { enum: ["trusted-reporter", "trusted-issue-evidence", null] },
+                runId: { type: "integer", minimum: 1 },
+                attempt: { type: "integer", minimum: 1 },
+                runUrl: { type: "string" },
+                candidateArtifact: { type: ["object", "null"], additionalProperties: true },
+              },
+            },
+            state: { type: "string" },
+            repairRound: { type: ["integer", "null"] },
+            freshness: { enum: ["fresh", "stale", "expired", "unavailable"] },
+            reporter: { type: "object", additionalProperties: true },
+            issue: { type: "object", additionalProperties: true },
+            signals: { type: "array", items: { type: "object", additionalProperties: true } },
+            coverage: { type: "object", additionalProperties: true },
+            warnings: { type: "array", items: { type: "string" } },
+            scope: { type: "object", additionalProperties: true },
+            budget: { type: "object", additionalProperties: true },
           },
         },
         RepositoryList: {
