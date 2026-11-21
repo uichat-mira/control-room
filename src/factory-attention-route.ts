@@ -5,11 +5,18 @@ import {
   type FactoryAttentionRun,
   type WorkerIssueLink,
   type WorkerIssueLookup,
+  type WorkerIssueCurrentness,
 } from "./factory-attention.ts";
-import { readWorkerIssueState } from "./factory-attention-facts.ts";
+import {
+  readWorkerIssueState,
+  readWorkerRecoveryIndex,
+  qualifyRecoveryCurrentness,
+  type WorkerRecoveryIndex,
+} from "./factory-attention-facts.ts";
 
 const API_VERSION = "v1";
 const ATTENTION_ISSUE_CACHE_SCHEMA = "v1";
+const ATTENTION_RECOVERY_INDEX_CACHE_SCHEMA = "v1";
 const ATTENTION_ISSUE_REFRESH_SECONDS = 60;
 const ISOLATE_FALLBACK_LIMIT = 50;
 
@@ -144,6 +151,55 @@ async function loadIssue(
   return { lookup, cache: "miss" };
 }
 
+// The Recovery pointer is a bounded second Issue source, queried only for a
+// confirmed escalated/blocked detail request; never on Factory TV/home views.
+const recoveryFallback = new Map<string, { index: WorkerRecoveryIndex; expiresAt: number }>();
+
+async function loadRecoveryIndex(
+  request: Request,
+  env: GitHubEnv,
+  repository: string,
+  issueNumber: number,
+): Promise<{ index: WorkerRecoveryIndex; cache: IssueCacheState }> {
+  const url = new URL(request.url);
+  const key = `${url.origin}/api/__factory-attention-recovery-${ATTENTION_RECOVERY_INDEX_CACHE_SCHEMA}-${authState(env)}-${encodeURIComponent(repository)}-${issueNumber}`;
+  let edgeCache: Cache | null = null;
+  try {
+    edgeCache = (caches as CacheStorage & { default: Cache }).default;
+    const cached = await edgeCache.match(new Request(key, { method: "GET" }));
+    if (cached) {
+      try { return { index: await cached.json() as WorkerRecoveryIndex, cache: "hit" }; }
+      catch { /* corrupt representation is never trusted */ }
+    }
+  } catch { edgeCache = null; }
+
+  if (!edgeCache) {
+    const fallback = recoveryFallback.get(key);
+    if (fallback && fallback.expiresAt > Date.now()) {
+      return { index: fallback.index, cache: "bypass" };
+    }
+  }
+  const index = await readWorkerRecoveryIndex(env, repository, issueNumber);
+  if (edgeCache) {
+    try {
+      await edgeCache.put(
+        new Request(key, { method: "GET" }),
+        cacheResponse(index, ATTENTION_ISSUE_REFRESH_SECONDS),
+      );
+    } catch {
+      recoveryFallback.set(key, {
+        index, expiresAt: Date.now() + ATTENTION_ISSUE_REFRESH_SECONDS * 1000,
+      });
+    }
+  } else {
+    if (recoveryFallback.size >= ISOLATE_FALLBACK_LIMIT) recoveryFallback.clear();
+    recoveryFallback.set(key, {
+      index, expiresAt: Date.now() + ATTENTION_ISSUE_REFRESH_SECONDS * 1000,
+    });
+  }
+  return { index, cache: "miss" };
+}
+
 function issueLinkFor(
   projection: FactoryRunProjection,
   issueNumber: number,
@@ -238,6 +294,9 @@ export async function handleFactoryAttentionRequest(
   let issue: WorkerIssueLink | null = null;
   let issueLookup: WorkerIssueLookup | null = null;
   let issueCache: IssueCacheState = "bypass";
+  let recoveryIndexCache: IssueCacheState = "bypass";
+  let recoveryIndexReadAttempted = false;
+  let currentness: WorkerIssueCurrentness | null = null;
   let apiResolved = false;
 
   if (issueNumber !== null) {
@@ -253,7 +312,31 @@ export async function handleFactoryAttentionRequest(
     }
   }
 
-  const run: FactoryAttentionRun = { projection, issue, issueLookup };
+  // Verify that an old escalation is CURRENT before promoting it to a P1
+  // todo. The Reporter is tied to the requested Run, not necessarily to the
+  // latest same-Issue Run. A valid current Issue alone is not enough.
+  if (issue && issueLookup?.query.status === "ok" &&
+      issueLookup.issue?.state === "open" &&
+      projection.reporter.status === "available" &&
+      (projection.state === "escalated" || projection.state === "blocked")) {
+    recoveryIndexReadAttempted = true;
+    try {
+      const result = await loadRecoveryIndex(request, env, repository, issueNumber!);
+      recoveryIndexCache = result.cache;
+      currentness = qualifyRecoveryCurrentness(
+        result.index,
+        projection.run.id,
+        projection.run.attempt,
+        projection.state,
+        issueLookup.issue.updatedAt,
+      );
+    } catch {
+      // The safe default is unknown, never a stale P1 alert.
+      currentness = null;
+    }
+  }
+
+  const run: FactoryAttentionRun = { projection, issue, issueLookup, currentness };
   const qualification = qualifyWorkerAttention([run]);
   const candidate = qualification.candidates[0];
 
@@ -266,6 +349,14 @@ export async function handleFactoryAttentionRequest(
 
   const payload = {
     ...candidate,
+    currentness: currentness ?? {
+      status: "unknown",
+      observedAt: null,
+      evidenceUrl: null,
+      latestRunId: null,
+      latestAttempt: null,
+      reason: "No currentness proof was requested or available for this Run.",
+    },
     scope: {
       kind: "single-run",
       repository: projection.repository,
@@ -275,11 +366,13 @@ export async function handleFactoryAttentionRequest(
     },
     budget: {
       scope: "per-attention-read",
-      additionalGithubRequests: issue ? 1 : 0,
+      additionalGithubRequests: (issue ? 1 : 0) + (recoveryIndexReadAttempted ? 1 : 0),
       issueReadAttempted: issue !== null,
       issueReadResolved: apiResolved,
+      recoveryIndexReadAttempted,
+      recoveryIndexCache,
       reporterQueried: includeReporter,
-      note: "The lifecycle projection reuses the existing Factory read/cache budget. This route adds at most one bounded, cached Issue-state read and never scans Workers Observability unless includeReporter=true was explicitly requested.",
+      note: "The lifecycle projection reuses the existing Factory read/cache budget. A terminal detail adds up to two cached bounded GitHub reads (Issue state and a single <=100-comment Recovery index page); each read has at most one short 429 retry. It never scans Workers Observability unless includeReporter=true was explicitly requested.",
     },
     warnings: Array.from(
       new Set([...qualification.warnings, ...candidate.warnings]),
@@ -297,6 +390,7 @@ export async function handleFactoryAttentionRequest(
         : "github-only",
       "x-mira-factory-attention-issue-read": issue ? "1" : "0",
       "x-mira-factory-attention-issue-cache": issueCache,
+      "x-mira-factory-attention-recovery-index": recoveryIndexReadAttempted ? recoveryIndexCache : "not_requested",
       "x-mira-factory-attention-coverage": candidate.coverage.status,
       "x-mira-factory-attention-reporter": candidate.reporter.status,
     },

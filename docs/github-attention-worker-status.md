@@ -18,7 +18,9 @@ GET /api/v1/factory/attention?repository=uichat-mira/<repo>&runId=<id>[&includeR
 - 默认 `includeReporter=false`：只复用 `getFactoryRunProjection(..., includeReporter=false)`，
   **绝不**查询 Cloudflare Workers Observability，也不访问首页。
 - `includeReporter=true` 是显式详情动作，复用现有单 Run Reporter 投影与其缓存；只有这时才
-  可能看到可信 `escalated` / `blocked` 终态。
+  可能看到可信 `escalated` / `blocked` 终态；但**单 Run 旧升级不能直接进入 P1**。
+  只有在 Issue 仍开放、最新完整可信 GitHub Recovery Pointer 确认该 Run/attempt
+  仍是当前终态时，才可以输出 `needs_attention`。缺少此证明即 `unknown`。
 - 路由默认不扫描 `getFactoryFeed()`；单 Run 的缺失不能推导全组织未结数量。批量候选聚合
   （如果未来首页需要）应把已获取的投影交给纯函数，并附带 `discoveryFromFeed()` 的覆盖边界。
 - 不修改 Factory TV UI、Overview、MCP、Worker workflow、dispatch、Recovery、通知或 GitHub 写路径。
@@ -32,7 +34,12 @@ GET /api/v1/factory/attention?repository=uichat-mira/<repo>&runId=<id>[&includeR
    缺口，不是 Worker 失败。
 3. **GitHub Issue 状态**：只有从可信来源获得 Issue 链接后，才允许一次有界读取 Issue 当前
    `open / closed`。标题、分支、`display_title`、Artifact 名称和自由文本都不是 Issue 号来源。
-4. **Factory Feed**：14 天 / 每仓库最多 20 Run / 最多展示 12 条的**近期候选发现**，不是全组织
+4. **GitHub Recovery Pointer**：仅在显式详情读取确认 `escalated/blocked` 且 Issue
+   为 open 后，才追加一次有界 GitHub Issue 评论页读取。只接受 GitHub Actions 官方 Bot
+   （verified bot id）的 `mira-recovery-candidate:v1` 合同，严格匹配仓库、Issue、
+   Run/attempt、终态及 Candidate 指纹字段。若评论多于第一页（100 条）、签名来源不符、
+   最新 Pointer 指向新 Run、Issue 在 Pointer 后又有变动，均**不能**证明旧升级为当前待办。
+5. **Factory Feed**：14 天 / 每仓库最多 20 Run / 最多展示 12 条的**近期候选发现**，不是全组织
    事实，也不是精确待办总数。
 
 ## Status semantics
@@ -51,6 +58,12 @@ GET /api/v1/factory/attention?repository=uichat-mira/<repo>&runId=<id>[&includeR
   证明自动返工已耗尽。可信 Reporter 的 `escalated`/`blocked` 才是升级信号。
 - `blocked` 也要求可信 repair 事件；仅仅 canonical 字段写着 `escalated` 而没有匹配事件时是
   `unknown`。
+- **重要修复**：单次读到旧 Run 的 `escalated` 不代表「仍无恢复」。
+  最新 Recovery Pointer 缺失/截断/不可信/被后续 Issue 更新覆盖时输出 `unknown`；
+  Pointer 证实同 Issue 更新的 Run 则将旧 P1 清除为 `unknown`，要求查询最新 Run
+  才能判断其新状态。只有与指定 Run/attempt 匹配的最新可信 Pointer 才可授予 P1。
+- `identity.candidateArtifact` 严格匹配规范 Candidate Artifact 名称；
+  只有 Verify/Delivery Artifact 时返回 `null` 并声明 Candidate 缺失，绝不顶替。
 - Run success、Artifact 存在、Draft PR 创建各只证明各自步骤；不自动接受、不自动关闭 Issue。
 - 自定义 `P0` 从不由普通 Worker 失败产生。P1 表示有效工作项确实无法自动继续。
 
@@ -95,8 +108,13 @@ worker:uichat-mira/<repo>#run:<id>:attempt:<n> 无核实 Issue，仅锚定 Run/a
 ## 请求预算与凭据
 
 - 生命周期读取完全复用现有 `cachedFactoryRun` 缓存，路由本身不增加 Factory Feed 扫描。
-- 只有存在可信 Issue 链接时，才追加**一次** `GET /repos/{org}/{repo}/issues/{n}`，边缘缓存
-  60 秒，隔离实例内另有 60 秒 fallback。最多一次 `Retry-After` 重试（≤1 秒窗口）。
+- 只有存在可信 Issue 链接时才追加一次 `GET /repos/{org}/{repo}/issues/{n}`；
+  显式 Reporter 模式确有可信终态且 Issue open 时，再追加**至多一页** 100 条
+  `GET /repos/{org}/{repo}/issues/{n}/comments?per_page=100` 核实 Recovery Pointer。
+  两种读取分别边缘缓存 60 秒 / isolate fallback；每次最多一次短窗口 Retry-After
+  重试。普通详情额外 0–1 REST；终态详情额外最多 2 REST（含短重试的绝对请求上界 4）。
+  原 canonical Run 读取本身常用 4 REST，因此终态无关联 PR 的首次冷读正常 6 REST。
+  这不是组织每小时请求预算已经经生产证明。
 - 默认响应头明确标注 `x-mira-factory-attention-source: github-only` 与
   `x-mira-factory-attention-issue-read: 0`。
 - 公开响应只包含 allowlist 字段；不包含 `GITHUB_READ_TOKEN`、Cloudflare 凭据、原始
@@ -137,7 +155,11 @@ worker:uichat-mira/<repo>#run:<id>:attempt:<n> 无核实 Issue，仅锚定 Run/a
 - `tests/factory-attention-facts.test.ts` — GitHub Issue payload 形状、PR payload 拒绝、
   403/429/404、单次有界重试、凭据不泄漏。
 - `tests/worker-factory-attention-route.test.ts` — T3：GitHub-only 默认不触发 Reporter/Issue
-  读取、显式 includeReporter、Issue 读取缓存、403 unknown、请求映射、无 token 泄漏。
+  读取、显式 includeReporter、Issue/Recovery Index 读取缓存、403 unknown、最新
+  同 Issue Pointer 清除旧升级、普通用户伪造 Pointer 不具资格、无 token 泄漏。
+- `tests/factory-attention.test.ts` 的维护者新增反例：没有当前性证明的旧升级
+  不能作为 P1；更晚同 Issue Pointer 必须清除旧 P1；仅 Verify/Delivery Artifact
+  不能代替 Candidate。
 - `npm run check` 包含 typecheck、`test:factory`（含新路由测试）和生产构建。
 
 ## 已知验证缺口与未证实链路
@@ -145,8 +167,11 @@ worker:uichat-mira/<repo>#run:<id>:attempt:<n> 无核实 Issue，仅锚定 Run/a
 - 本 Worker runner 没有 Cloudflare/Reporter 凭据，因此**没有**在真实生产 run 上实际取得
   trusted `escalated` 事件并跑通端到端关注候选；可信升级路径由夹具覆盖。真实 Run 只证实了
   GitHub-only `observation_gap`/`artifact_unavailable` 与 Issue 关闭读取。
-- `escalated → 后续同 Issue Repairing → 解除` 需要调用方提供多个 canonical 投影；单 Run
-  路由不猜测同 Issue 的其它 Run。首页如何聚合属于 OPS-038，不在本切片内。
+- `escalated → 后续同 Issue Repairing → 解除` 在多 Run 纯函数中会重算；
+  单 Run 路由现在能利用 GitHub Recovery Pointer 判断**已有更新的可信索引**并
+  撤下旧 P1，但**不能**据此推断新 Run 已完成产品验收，也无法自动发现尚未写入
+  Recovery Pointer 的在途 Run。Pointer 页不完整或 Issue 后续有新活动时拒绝
+  输出 P1。首页如何聚合仍属于 OPS-038，不在本切片内。
 - 人工“权责映射”（谁具体接手）尚未由组织合同授予；候选只写 `<repo> maintainers`，不伪造个人。
 - Factory Feed 不是完整发现源；本切片不会输出“全组织剩余 N 单”。
 

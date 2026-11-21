@@ -103,6 +103,27 @@ function projection(
   };
 }
 
+function trustedPointer(overrides: Record<string, unknown> = {}) {
+  const value = {
+    schema_version: 1,
+    repository: repo,
+    issue_number: 482,
+    run_id: 44547710817,
+    run_attempt: 1,
+    lifecycle_state: "ESCALATED",
+    base_sha: "c8e944ef625a99e2ed103955fd9bbbf7c3e92f55",
+    candidate_artifact_id: "14543494564",
+    ...overrides,
+  };
+  return {
+    id: 7055556740,
+    user: { id: 41898282, login: "github-actions[bot]", type: "Bot" },
+    created_at: "2026-11-21T01:20:10Z",
+    html_url: `https://github.com/${repo}/issues/482#issuecomment-7055556740`,
+    body: `<!-- mira-recovery-candidate:v1\n${JSON.stringify(value)}\n-->\nMira Recovery pointer`,
+  };
+}
+
 function openIssue() {
   return {
     number: 482,
@@ -162,6 +183,11 @@ test("includeReporter=true reuses a trusted escalated event and reads the verifi
       return HttpResponse.json(openIssue());
     }),
   );
+  network.use(
+    http.get(`${base}/repos/uichat-mira/mira-desktop/issues/482/comments`, () =>
+      HttpResponse.json([trustedPointer()]),
+    ),
+  );
   const run = projection("escalated", {
     issueNumber: 482,
     events: [event()],
@@ -200,6 +226,11 @@ test("the bounded Issue read is edge-cached across repeated attention reads", as
     }),
   );
   const run = projection("escalated", { issueNumber: 482, events: [event()] });
+  network.use(
+    http.get(`${base}/repos/uichat-mira/mira-desktop/issues/482/comments`, () =>
+      HttpResponse.json([trustedPointer()]),
+    ),
+  );
   const loader = async () => run;
   const query = `repository=${encodeURIComponent(repo)}&runId=44547710817&includeReporter=true`;
 
@@ -321,4 +352,55 @@ test("GitHub-only worker failure remains unknown in the route output", async () 
   const signals = body.signals as Array<{ kind: string }>;
   assert.ok(signals.some((signal) => signal.kind === "reporter_not_requested"));
   assert.ok(signals.some((signal) => signal.kind === "worker_failed_unproven_recovery"));
+});
+
+test("single-run API clears old escalation when a newer same-Issue Recovery pointer exists", async () => {
+  network.use(
+    http.get(`${base}/repos/uichat-mira/mira-desktop/issues/482`, () => HttpResponse.json(openIssue())),
+    http.get(`${base}/repos/uichat-mira/mira-desktop/issues/482/comments`, () =>
+      HttpResponse.json([
+        trustedPointer(),
+        { ...trustedPointer({ run_id: 44547710999, lifecycle_state: "VERIFIED" }),
+          id: 7055556900,
+          created_at: "2026-11-21T01:40:00Z" },
+      ]),
+    ),
+  );
+  const { body, response } = await read(
+    `repository=${encodeURIComponent(repo)}&runId=44547710817&includeReporter=true`,
+    async () => projection("escalated", { issueNumber: 482, events: [event()] }),
+  );
+  assert.equal(body.status, "unknown");
+  assert.equal(body.priority, null);
+  assert.equal((body.currentness as Record<string, unknown>).status, "superseded");
+  assert.equal(response.headers.get("x-mira-factory-attention-status"), "unknown");
+});
+
+test("missing Recovery pointer means a terminal Run is unknown even if Issue is open", async () => {
+  network.use(
+    http.get(`${base}/repos/uichat-mira/mira-desktop/issues/482`, () => HttpResponse.json(openIssue())),
+    http.get(`${base}/repos/uichat-mira/mira-desktop/issues/482/comments`, () => HttpResponse.json([])),
+  );
+  const { body } = await read(
+    `repository=${encodeURIComponent(repo)}&runId=44547710817&includeReporter=true`,
+    async () => projection("escalated", { issueNumber: 482, events: [event()] }),
+  );
+  assert.equal(body.status, "unknown");
+  assert.equal((body.currentness as Record<string, unknown>).status, "unknown");
+  assert.equal(body.priority, null);
+});
+
+test("human-forged Recovery comment cannot authorize an escalated P1", async () => {
+  network.use(
+    http.get(`${base}/repos/uichat-mira/mira-desktop/issues/482`, () => HttpResponse.json(openIssue())),
+    http.get(`${base}/repos/uichat-mira/mira-desktop/issues/482/comments`, () =>
+      HttpResponse.json([{ ...trustedPointer(), user: { id: 12, login: "someone", type: "User" } }]),
+    ),
+  );
+  const { body } = await read(
+    `repository=${encodeURIComponent(repo)}&runId=44547710817&includeReporter=true`,
+    async () => projection("escalated", { issueNumber: 482, events: [event()] }),
+  );
+  assert.equal(body.status, "unknown");
+  assert.equal(body.priority, null);
 });

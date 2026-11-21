@@ -209,6 +209,14 @@ function escalatedRun(overrides: {
     }),
     issue: overrides.issue === undefined ? link({ runId, attempt, issueNumber: overrides.issueNumber ?? 482 }) : overrides.issue,
     issueLookup: overrides.lookup === undefined ? issueLookup("open") : overrides.lookup,
+    currentness: {
+      status: "confirmed_current",
+      observedAt: "2026-11-21T01:30:00Z",
+      evidenceUrl: `https://github.com/${REPO}/issues/482#issuecomment-100`,
+      latestRunId: runId,
+      latestAttempt: attempt,
+      reason: "Latest trusted Recovery pointer confirms this terminal Run.",
+    },
   };
 }
 
@@ -528,7 +536,7 @@ test("expired Reporter and expired Artifact are coverage gaps, not failures", ()
       artifacts: [
         {
           id: 1,
-          name: "mira-external-worker-candidate-482",
+          name: "mira-external-worker-candidate-482-44547710817-1",
           expired: true,
           createdAt: "2026-11-01T00:00:00Z",
           expiresAt: "2026-11-15T00:00:00Z",
@@ -671,4 +679,42 @@ test("empty supplied runs do not invent a healthy organization", () => {
   assert.equal(result.candidates.length, 0);
   assert.equal(result.counts.attention, 0);
   assert.match(result.scope.note, /cannot prove the absence/);
+});
+
+test("an old trusted escalation with no currentness proof is UNKNOWN, not a stale P1", () => {
+  const run = escalatedRun();
+  run.currentness = null;
+  const candidate = qualifyWorkerAttention([run], { now: NOW }).candidates[0];
+  assert.equal(candidate.status, "unknown");
+  assert.equal(candidate.priority, null);
+  assert.ok(candidate.signals.some((s) => s.kind === "same_issue_currentness_unknown"));
+});
+
+test("a newer trusted Recovery pointer clears the old P1 without faking acceptance", () => {
+  const run = escalatedRun();
+  run.currentness = {
+    status: "superseded",
+    observedAt: "2026-11-21T01:42:00Z",
+    evidenceUrl: `https://github.com/${REPO}/issues/482#issuecomment-101`,
+    latestRunId: 44547710999,
+    latestAttempt: 1,
+    reason: "Newer same-Issue Recovery pointer is indexed; old Run no longer current.",
+  };
+  const candidate = qualifyWorkerAttention([run], { now: NOW }).candidates[0];
+  assert.equal(candidate.status, "unknown");
+  assert.equal(candidate.priority, null);
+  assert.ok(candidate.signals.some((s) => s.kind === "superseded_by_newer_index"));
+});
+
+test("only Verify/Delivery artifacts must not masquerade as Candidate", () => {
+  const run = escalatedRun();
+  run.projection.artifacts = [
+    { ...run.projection.artifacts[0],
+      name: "mira-external-worker-verify-44547710817-1" },
+    { ...run.projection.artifacts[0],
+      id: 14543494565, name: "mira-external-worker-delivery-44547710817-1" },
+  ];
+  const candidate = qualifyWorkerAttention([run], { now: NOW }).candidates[0];
+  assert.equal(candidate.identity.candidateArtifact, null);
+  assert.equal(candidate.status, "needs_attention");
 });

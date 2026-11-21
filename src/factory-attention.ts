@@ -63,10 +63,13 @@ export type WorkerAttentionSignalKind =
   | "reporter_event_gap"
   | "artifact_expired"
   | "artifact_unavailable"
+  | "candidate_artifact_missing"
   | "worker_failed_unproven_recovery"
   | "validation_gap"
   | "unknown_state"
   | "superseded_by_newer_run"
+  | "same_issue_currentness_unknown"
+  | "superseded_by_newer_index"
   | "recovery_evidence_without_identity"
   | "discovery_limited";
 
@@ -116,10 +119,21 @@ export interface WorkerIssueLookup {
  * that already knows about several Runs/attempts for the same Issue should pass
  * them together so the newest Run supersedes older attention.
  */
+/** Currentness from a bounded, authenticated GitHub Issue Recovery index. */
+export interface WorkerIssueCurrentness {
+  status: "confirmed_current" | "superseded" | "unknown";
+  observedAt: string | null;
+  evidenceUrl: string | null;
+  latestRunId: number | null;
+  latestAttempt: number | null;
+  reason: string;
+}
+
 export interface FactoryAttentionRun {
   projection: FactoryRunProjection;
   issue: WorkerIssueLink | null;
   issueLookup?: WorkerIssueLookup | null;
+  currentness?: WorkerIssueCurrentness | null;
 }
 
 export interface WorkerAttentionDiscovery {
@@ -360,13 +374,12 @@ function candidateArtifact(projection: FactoryRunProjection): {
   expired: boolean;
   url: string;
 } | null {
-  const matches = projection.artifacts.filter((artifact) => /candidate/i.test(artifact.name));
-  const chosen =
-    matches.find((artifact) => !artifact.expired) ??
-    matches[0] ??
-    projection.artifacts.find((artifact) => !artifact.expired) ??
-    projection.artifacts[0] ??
-    null;
+  // Candidate identity is a distinct artifact contract; Verify/Delivery
+  // artifacts must never impersonate the candidate when it is missing.
+  const matches = projection.artifacts.filter((artifact) =>
+    /^mira-external-worker-candidate-\d+-\d+-\d+$/.test(artifact.name),
+  );
+  const chosen = matches.find((artifact) => !artifact.expired) ?? matches[0] ?? null;
   if (!chosen) return null;
   return {
     artifactId: chosen.id,
@@ -857,9 +870,34 @@ function buildCandidate(
         detail: `Issue #${link.issueNumber} is closed at GitHub${lookup?.issue?.stateReason ? ` (${lookup.issue.stateReason})` : ""}; the old Worker escalation is no longer current.`,
         evidence: [issueEvidence(link, lookup)],
       });
+    } else if (entry.run.currentness?.status !== "confirmed_current") {
+      // An Issue remaining open does NOT prove that a historic Run still owns
+      // the handoff. In particular a newer same-Issue attempt may already be
+      // repairing while this old Reporter escalation is still queryable.
+      const proof = entry.run.currentness;
+      status = "unknown";
+      primaryKind = proof?.status === "superseded"
+        ? "superseded_by_newer_index"
+        : "same_issue_currentness_unknown";
+      signals.push({
+        kind: primaryKind,
+        status: "unknown",
+        detail: proof?.reason ??
+          "No bounded, trusted same-Issue Recovery index was supplied, so the currentness of this escalation cannot be proven.",
+        evidence: proof?.evidenceUrl
+          ? [{ label: "GitHub trusted Recovery pointer", url: proof.evidenceUrl, observedAt: proof.observedAt }]
+          : [runRow],
+      });
     } else {
       status = "needs_attention";
       primaryKind = expected === "escalated" ? "escalated_terminal" : "blocked_terminal";
+      if (entry.run.currentness.evidenceUrl) {
+        evidence.push({
+          label: "Current trusted Issue Recovery pointer",
+          url: entry.run.currentness.evidenceUrl,
+          observedAt: entry.run.currentness.observedAt,
+        });
+      }
       evidence.push(escalationEvidence(event));
       signals.push({
         kind: primaryKind,
@@ -939,9 +977,9 @@ function buildCandidate(
   if (projection.artifacts.some((artifact) => artifact.expired)) {
     reasons.push("One or more Artifacts are expired.");
   }
-  if (sameIssueHistory === "not_supplied") {
+  if (sameIssueHistory === "not_supplied" && entry.run.currentness?.status !== "confirmed_current") {
     reasons.push(
-      "Same-Issue run history was not supplied; a newer Run/attempt for this Issue may exist outside this read.",
+      "Same-Issue run history and a reliable latest trusted Recovery pointer were not both available; a newer Run/attempt may exist outside this read.",
     );
   }
   if (discovery && (discovery.coverageLimited || discovery.displayLimitReached || discovery.feedStatus !== "connected")) {
@@ -961,7 +999,9 @@ function buildCandidate(
 
   if (sameIssueHistory === "not_supplied") {
     warnings.push(
-      "Same-Issue history was not supplied. A newer Run/attempt or recovery for the same Issue may exist; only the supplied latest Run is assessed as current.",
+      entry.run.currentness?.status === "confirmed_current"
+        ? "The current Run matches the latest bounded trusted Recovery pointer; unindexed in-flight Runs may still be outside this observation."
+        : "Same-Issue history was not supplied. A newer Run/attempt or recovery for the same Issue may exist; do not present this Run as the current blocker.",
     );
   }
   if (discovery) {
@@ -969,6 +1009,16 @@ function buildCandidate(
   }
 
   const artifact = candidateArtifact(projection);
+  if (!artifact && ["escalated", "blocked", "verified", "delivered"].includes(projection.state)) {
+    signals.push({
+      kind: "candidate_artifact_missing",
+      status: "unknown",
+      detail: "No canonical Candidate Artifact is present in this Run. Verify/Delivery artifacts cannot substitute for Candidate identity.",
+      evidence: [runRow],
+    });
+    reasons.push("Canonical Candidate Artifact was not observed.");
+    warnings.push("Candidate Artifact is missing; no Verify/Delivery artifact was relabeled as a Candidate.");
+  }
   if (artifact) {
     evidence.push({
       label: `Candidate Artifact ${artifact.name}${artifact.expired ? " (expired)" : ""}`,
