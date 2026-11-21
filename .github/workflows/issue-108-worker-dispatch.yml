@@ -22,7 +22,7 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-    uses: uichat-mira/.github/.github/workflows/mira-external-worker.yml@1e62aa0164e96435af2e8d21467205a9a30fc0ce
+    uses: uichat-mira/.github/.github/workflows/mira-external-worker.yml@ffafbf0c79ad59daeaf3f78f88f9942a219a02e1
     with:
       issue_number: 108
       base_branch: chore/issue-108-worker-dispatch
