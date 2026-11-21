@@ -101,19 +101,12 @@ export default function Overview() {
 
   return (
     <div className="control-dashboard">
-      <header className="dashboard-intro">
-        <div>
-          <span className="dashboard-kicker">CENTRAL OFFICE / CONTROL PANEL</span>
-          <h2>从这里进入</h2>
-          <p>一个入口，一项职责。状态只做提示，详情交给各部门与专用控制台。</p>
-        </div>
-        <span className="dashboard-readonly" role="status">
-          {initialCollectionPending ? <TuiSpinner /> : <span className="dashboard-live-dot" aria-hidden="true" />}
-          公开只读 · {refreshFailed ? "部分来源刷新失败" :
-            initialCollectionPending ? "正在核对只读快照" :
-              lastObserved ? "采集 " + formatTime(lastObserved) : "来源未提供观察时间"}
-        </span>
-      </header>
+      <div className="dashboard-readonly" role="status">
+        {initialCollectionPending ? <TuiSpinner /> : <span className="dashboard-live-dot" aria-hidden="true" />}
+        公开只读 · {refreshFailed ? "部分来源刷新失败" :
+          initialCollectionPending ? "正在核对只读快照" :
+            lastObserved ? "采集 " + formatTime(lastObserved) : "来源未提供观察时间"}
+      </div>
 
       <nav className="dashboard-signals" aria-label="厂务状态速览">
         <Link to="/attention" className={signals.confirmedAttention && signals.confirmedAttention > 0
