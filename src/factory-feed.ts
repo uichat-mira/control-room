@@ -3,9 +3,11 @@ import type { GitHubEnv } from "./github";
 const ORG = "uichat-mira";
 const API = "https://api.github.com";
 const MAX_REPOSITORIES = 24; // Workers Free has a bounded subrequest budget.
-const RUNS_PER_REPOSITORY = 20;
-const MAX_ITEMS = 12;
-const HISTORY_DAYS = 14;
+// Exported so attention projections can state the discovery bounds instead of
+// repeating (and drifting from) these magic numbers.
+export const FACTORY_FEED_RUNS_PER_REPOSITORY = 20;
+export const FACTORY_FEED_MAX_ITEMS = 12;
+export const FACTORY_FEED_HISTORY_DAYS = 14;
 const WORKER_PATH = "uichat-mira/.github/.github/workflows/mira-external-worker.yml";
 
 type Repo = { name: string; default_branch: string; archived: boolean; fork: boolean; visibility: string };
@@ -111,7 +113,7 @@ export async function getFactoryFeed(env: GitHubEnv, now = Date.now()): Promise<
       try {
         const { value } = await jsonGet<{ workflow_runs?: WorkerRun[] }>(
           env,
-          `/repos/${ORG}/${repo.name}/actions/workflows/mira-external-worker.yml/runs?per_page=${RUNS_PER_REPOSITORY}`,
+          `/repos/${ORG}/${repo.name}/actions/workflows/mira-external-worker.yml/runs?per_page=${FACTORY_FEED_RUNS_PER_REPOSITORY}`,
         );
         // 404 means this repository has no External Worker caller.
         return { failed: false, repository: repo.name, runs: value?.workflow_runs ?? [] };
@@ -129,7 +131,7 @@ export async function getFactoryFeed(env: GitHubEnv, now = Date.now()): Promise<
         if (!run.referenced_workflows?.some((workflow) => workflow.path.startsWith(WORKER_PATH + "@"))) continue;
         if (!Number.isSafeInteger(run.id) || run.id <= 0) continue;
         const created = Date.parse(run.created_at);
-        if (!Number.isFinite(created) || created > now || now - created > HISTORY_DAYS * 86400000) continue;
+        if (!Number.isFinite(created) || created > now || now - created > FACTORY_FEED_HISTORY_DAYS * 86400000) continue;
         all.push({
           id: run.id, repository: `${ORG}/${result.repository}`,
           status: run.status, conclusion: run.conclusion,
@@ -160,7 +162,7 @@ export async function getFactoryFeed(env: GitHubEnv, now = Date.now()): Promise<
     eligibleRepositories: eligible.length,
     failedRepositories,
     coverageLimited: eligible.length > MAX_REPOSITORIES,
-    historyDays: HISTORY_DAYS,
-    items: all.slice(0, MAX_ITEMS),
+    historyDays: FACTORY_FEED_HISTORY_DAYS,
+    items: all.slice(0, FACTORY_FEED_MAX_ITEMS),
   };
 }

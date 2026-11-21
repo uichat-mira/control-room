@@ -12,6 +12,7 @@ import { getFactoryRunProjection, type FactoryRunProjection } from "./factory-re
 import { getFactoryFeed, type FactoryFeed } from "./factory-feed";
 import { handleGitHubFactsRequest, handleGitHubGateRequest } from "./github-facts-route";
 import { handleGitHubPullRequestRequest } from "./github-pr-route";
+import { handleFactoryAttentionRequest } from "./factory-attention-route";
 import type { OrganizationSnapshot } from "./shared";
 
 const AUTH_GITHUB_TTL_SECONDS = 15 * 60;
@@ -368,6 +369,7 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
         "/api/v1/github/pull?repository=uichat-mira/mira-desktop&number=404",
         "/api/v1/factory/runs",
         "/api/v1/factory/run?repository=uichat-mira/mira-mobile&runId=...",
+        "/api/v1/factory/attention?repository=uichat-mira/mira-mobile&runId=...",
       ],
     });
   }
@@ -484,6 +486,11 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
         error: reason,
       }), { status });
     }
+  }
+
+  if (pathname === "/api/v1/factory/attention") {
+    return handleFactoryAttentionRequest(request, env, (repository, runId, includeReporter) =>
+      cachedFactoryRun(request, env, repository, runId, includeReporter));
   }
 
   if (pathname === "/api/v1/github/facts") {
