@@ -1,10 +1,19 @@
-# GitHub「需要关注」资格、解除与查询预算（设计契约草案）
+# GitHub「需要关注」资格、解除与查询预算（原始设计基线）
 
-> Status: Proposed / not implemented / not accepted
+> Status: Historical design baseline (2026-11-20); current implementation follows the source and task contracts.
 >
 > Date: 2026-11-20 · Owner: uichat-mira/control-room
 >
 > 本文是可审查的产品/技术设计候选，不是新 GitHub Issue、组织政策或已经生效的监控。此次只提交文档，不修改运行代码、创建任务卡、发送通知或发布生产。
+
+## 2026-11-21 实施状态说明
+
+以下“未实施 / 仅设计”等措辞记录起草当日的历史情况，不是当前产品状态。
+
+- OPS-034～037 已在生产，事实契约分别由 docs/github-attention-facts.md、docs/github-attention-gate-status.md、docs/github-attention-pr-status.md、docs/github-attention-worker-status.md 和对应源码负责。
+- OPS-038 由 Issue #109 定义交付和验收；当前改造分支中的 src/attention-center.ts、src/Overview.tsx 将可信候选整理成「需要关注 / 正在推进 / 历史观察 / 数据不足」，不复制资格判定。
+- 当前仍有边界：必要 GitHub required checks 无可信全面读取；非 Draft Hold 不能自动取证；Worker 当前性由有界 Recovery Pointer 支撑；六仓库 Facts 是每小时缓存、PR 每仓库最多 5 项、Factory Feed 最近最多 12 项。未核验及试点外事项绝不当作已恢复或“0 风险”。
+- 此处标注的 OPS-038 实施状态仅指开发候选；合并、验收和生产发布须另以 PR/CI/运行事实确认。
 
 ## 一、目标与当前事实
 

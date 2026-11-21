@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { workflowText, workflowTone } from "../src/data.ts";
 import { buildState } from "../src/engineering-facts.ts";
-import { collectAttention } from "../src/overview-facts.ts";
-import type { RepositoryWorkflow, OrganizationRepository } from "../src/shared.ts";
+import { projectAttentionDesk } from "../src/attention-center.ts";
+import type { RepositoryWorkflow } from "../src/shared.ts";
 
 const run = (
   conclusion: RepositoryWorkflow["conclusion"],
@@ -15,14 +15,6 @@ const run = (
   createdAt: "2026-11-19T12:00:00Z",
   updatedAt: "2026-11-19T12:30:00Z",
 });
-
-const repo = (name: string, workflow: RepositoryWorkflow | null) => ({
-  name,
-  fullName: "uichat-mira/" + name,
-  htmlUrl: "https://github.com/uichat-mira/" + name,
-  defaultBranch: "dev",
-  latestWorkflow: workflow,
-}) as OrganizationRepository;
 
 test("System Wall preserves the Engineering state classification for every meaningful Run result", () => {
   const cases: [RepositoryWorkflow | null, string, string][] = [
@@ -50,16 +42,14 @@ test("System Wall preserves the Engineering state classification for every meani
   assert.equal(workflowText(run(null, "in_progress")), "Running");
 });
 
-test("Overview does not promote a raw latest Run failure/action into a necessary-Gate incident", () => {
-  const entries = collectAttention([
-    repo("missing", run(null)),
-    repo("stale", run("stale")),
-    repo("action", run("action_required")),
-    repo("failed", run("failure")),
-    repo("cancelled", run("cancelled")),
-    repo("queued", run(null, "queued")),
-  ], [], []);
-  // The raw Run remains available to Engineering/Wall, but the Overview
-  // attention projection cannot infer required Gate or production impact.
-  assert.deepEqual(entries, []);
+test("Overview never promotes the latest raw Run into a required Gate without qualification", () => {
+  const raw = [
+    run(null), run("stale"), run("action_required"), run("failure"),
+    run("cancelled"), run(null, "queued"),
+  ];
+  assert.equal(raw.filter(item => buildState(item) === "failed").length, 1);
+  // Raw Run objects are NOT inputs to the OPS-038 qualifying projection.
+  const desk = projectAttentionDesk({ gates: null, facts: null });
+  assert.deepEqual(desk.attention, []);
+  assert.ok(desk.disclosure.some(item => item.includes("Gate")));
 });

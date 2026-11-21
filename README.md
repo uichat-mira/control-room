@@ -124,7 +124,7 @@ The organization Actions secret is named `ORG_GITHUB_TOKEN`. CI maps it into the
 
 ## Views
 
-- `/` — Overview: cross-domain summary, current exceptions, and the active public Project
+- `/` — Overview: evidence-qualified attention center (OPS-038), with explicit in-progress / observation / unknown lanes and on-demand single-PR or Worker qualification; not an exact organization-wide todo count.
 - `/engineering` — repositories, latest default-branch builds, releases, Workers, and Pages delivery
 - `/runtime` — live service probes, Workers, Pages, and 24-hour traffic/error analytics
 - `/governance` — Issues, pull requests, default-branch protection, rulesets, and public Projects
