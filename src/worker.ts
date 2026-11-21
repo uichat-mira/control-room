@@ -10,7 +10,10 @@ import { openApiDocument } from "./openapi";
 import { getServiceSnapshot } from "./services";
 import { getFactoryRunProjection, type FactoryRunProjection } from "./factory-read-model";
 import { getFactoryFeed, type FactoryFeed } from "./factory-feed";
-import type { OrganizationRepository, OrganizationSnapshot } from "./shared";
+import { handleGitHubFactsRequest, handleGitHubGateRequest } from "./github-facts-route";
+import { handleGitHubPullRequestRequest } from "./github-pr-route";
+import { handleFactoryAttentionRequest } from "./factory-attention-route";
+import type { OrganizationSnapshot } from "./shared";
 
 const AUTH_GITHUB_TTL_SECONDS = 15 * 60;
 const ANON_GITHUB_TTL_SECONDS = 30 * 60;
@@ -270,25 +273,6 @@ async function cachedGovernance(request: Request, env: Env): Promise<GitHubGover
   }
 }
 
-function buildFailed(repositories: OrganizationRepository[]): boolean {
-  return repositories.some((repo) => {
-    const run = repo.latestWorkflow;
-    if (!run || run.status !== "completed") return false;
-
-    const failed = ["failure", "timed_out", "action_required", "startup_failure"].includes(
-      run.conclusion ?? "",
-    );
-    if (!failed) return false;
-
-    const releaseAt = repo.latestRelease?.publishedAt;
-    if (releaseAt && new Date(releaseAt).getTime() > new Date(run.updatedAt).getTime()) {
-      return false;
-    }
-
-    return true;
-  });
-}
-
 async function summary(request: Request, env: Env): Promise<OrganizationSnapshot> {
   const generatedAt = new Date().toISOString();
   const [github, cloudflare, services] = await Promise.all([
@@ -316,10 +300,11 @@ async function summary(request: Request, env: Env): Promise<OrganizationSnapshot
     services,
     deployedCommit: env.DEPLOYED_COMMIT ?? null,
     error: github.error,
-    status:
-      githubIssue || cloudflareIssue || serviceIssue || buildFailed(github.repositories)
-        ? "degraded"
-        : "connected",
+    // `repositories[].latestWorkflow` remains the raw latest Actions Run for
+    // engineering inspection. A failed/unrelated Run is not runtime health and
+    // must not degrade the organization summary; necessary Gate evidence is
+    // projected separately by /api/v1/github/gates.
+    status: githubIssue || cloudflareIssue || serviceIssue ? "degraded" : "connected",
   };
 }
 
@@ -379,8 +364,12 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
         "/api/v1/analytics",
         "/api/v1/governance",
         "/api/v1/projects",
+        "/api/v1/github/facts",
+        "/api/v1/github/gates",
+        "/api/v1/github/pull?repository=uichat-mira/mira-desktop&number=404",
         "/api/v1/factory/runs",
         "/api/v1/factory/run?repository=uichat-mira/mira-mobile&runId=...",
+        "/api/v1/factory/attention?repository=uichat-mira/mira-mobile&runId=...",
       ],
     });
   }
@@ -497,6 +486,23 @@ async function v1Route(request: Request, env: Env, pathname: string): Promise<Re
         error: reason,
       }), { status });
     }
+  }
+
+  if (pathname === "/api/v1/factory/attention") {
+    return handleFactoryAttentionRequest(request, env, (repository, runId, includeReporter) =>
+      cachedFactoryRun(request, env, repository, runId, includeReporter));
+  }
+
+  if (pathname === "/api/v1/github/facts") {
+    return handleGitHubFactsRequest(request, env);
+  }
+
+  if (pathname === "/api/v1/github/gates") {
+    return handleGitHubGateRequest(request, env);
+  }
+
+  if (pathname === "/api/v1/github/pull") {
+    return handleGitHubPullRequestRequest(request, env);
   }
 
   if (pathname === "/api/v1/governance" || pathname === "/api/v1/projects") {

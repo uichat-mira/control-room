@@ -52,7 +52,10 @@ export default function Overview() {
   const projectsReady = governance.data?.github.projects.status === "connected";
   const projects = projectsReady ? governance.data!.github.projects.items : [];
   const activeProject = projects.find((project) => !project.closed) ?? projects[0] ?? null;
-  const failedBuilds = attention.filter((entry) => entry.category === "build" && entry.severity === "failure").length;
+  const failedBuilds = snapshot.repositories.filter((repo) =>
+    repo.latestWorkflow?.status === "completed" &&
+    ["failure", "timed_out", "startup_failure"].includes(repo.latestWorkflow.conclusion ?? ""),
+  ).length;
   const buildsWithRuns = snapshot.repositories.filter((repo) => Boolean(repo.latestWorkflow)).length;
   const passingBuilds = snapshot.repositories.filter((repo) =>
     repo.latestWorkflow?.status === "completed" && repo.latestWorkflow.conclusion === "success",
@@ -76,12 +79,12 @@ export default function Overview() {
   const sourceUnknown = !governance.data || !feed;
   const briefTone = failedOperations ? "attention" : sourcePartial || sourceUnknown ? "uncertain" : "quiet";
   const currentLine = failedOperations
-    ? failedOperations + " 项运行异常待查看"
+    ? failedOperations + " 项需要关注"
     : sourcePartial || sourceUnknown
       ? "已有快照，仍有观测缺口"
       : "当前快照未见运行异常";
   const briefDescription = failedOperations
-    ? "按当前最新默认分支构建与 HTTP 探针统计。旧失败记录可能仍是各仓库的最近一次构建，并非刚发生的事故。"
+    ? "按服务探针与已读治理记录统计。仓库最近 Run 保留为工程档案，不等于当前必要 Gate 或生产事故。"
     : "这表示当前已覆盖的数据范围没有检出异常，不代表所有业务链路均完成验收。";
   const workCoverage = feed
     ? "近 " + feed.historyDays + " 天 · 最近 " + feed.items.length + " 条已发现 Run" +
@@ -233,9 +236,9 @@ export default function Overview() {
             <small>{snapshot.repositories.filter((repo) => !repo.archived).length} 个非归档仓库</small>
           </Link>
           <Link to="/engineering" className="home-stat">
-            <span>最新构建通过</span>
+            <span>最近 Run 成功</span>
             <strong>{passingBuilds}<i>/ {buildsWithRuns || "—"}</i></strong>
-            <small>{failedBuilds} 个最近构建失败 · 不代表所有 PR 的 CI</small>
+            <small>{failedBuilds} 个最近 Run 失败记录 · 非必要 Gate/生产状态</small>
           </Link>
           <Link to="/runtime" className="home-stat">
             <span>服务探针在线</span>

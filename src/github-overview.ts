@@ -61,8 +61,8 @@ export function renderGitHubOverviewSvg(snapshot: OrganizationSnapshot): string 
   const statusColor = healthy ? "#3fb950" : "#d29922";
   const buildsLabel =
     stats.trackedBuilds === 0
-      ? "No CI data"
-      : `${stats.successfulBuilds}/${stats.trackedBuilds} green`;
+      ? "No Run data"
+      : `${stats.successfulBuilds}/${stats.trackedBuilds} success`;
   const servicesLabel = `${stats.onlineServices}/${stats.services} online`;
   const githubLabel = sourceLabel("GitHub", snapshot.sources.github);
   const cloudflareLabel = sourceLabel("Cloudflare", snapshot.sources.cloudflare);
@@ -71,7 +71,7 @@ export function renderGitHubOverviewSvg(snapshot: OrganizationSnapshot): string 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="220" viewBox="0 0 900 220" role="img" aria-labelledby="title desc">
   <title id="title">Mira Control Room organization snapshot</title>
-  <desc id="desc">${statusLabel}. ${stats.repositories} repositories, ${buildsLabel} latest CI, ${servicesLabel} services.</desc>
+  <desc id="desc">${statusLabel}. ${stats.repositories} repositories, ${buildsLabel} latest Runs (not necessary-Gate or production health), ${servicesLabel} services.</desc>
   <rect width="900" height="220" rx="18" fill="#0d1117"/>
   <rect x="0.5" y="0.5" width="899" height="219" rx="17.5" fill="none" stroke="#30363d"/>
   <circle cx="38" cy="38" r="7" fill="#c15f3c"/>
@@ -87,7 +87,7 @@ export function renderGitHubOverviewSvg(snapshot: OrganizationSnapshot): string 
   <text x="46" y="148" fill="#f0f6fc" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="25" font-weight="700">${stats.repositories}</text>
 
   <rect x="242" y="92" width="198" height="72" rx="12" fill="#161b22" stroke="#21262d"/>
-  <text x="260" y="118" fill="#8b949e" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12">LATEST CI</text>
+  <text x="260" y="118" fill="#8b949e" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12">LATEST RUNS</text>
   <text x="260" y="148" fill="#f0f6fc" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="20" font-weight="700">${buildsLabel}</text>
 
   <rect x="456" y="92" width="198" height="72" rx="12" fill="#161b22" stroke="#21262d"/>
