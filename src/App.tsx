@@ -24,9 +24,10 @@ import {
 } from "lucide-react";
 
 type ThemeMode = "system" | "light" | "dark";
-type PageKey = "overview" | "engineering" | "runtime" | "governance";
+type PageKey = "overview" | "attention" | "engineering" | "runtime" | "governance";
 
 const Overview = lazy(() => import("./Overview"));
+const AttentionDeskPage = lazy(() => import("./AttentionDeskPage"));
 const Engineering = lazy(() => import("./Engineering"));
 const Runtime = lazy(() => import("./Runtime"));
 const Governance = lazy(() => import("./Governance"));
@@ -53,6 +54,12 @@ const routes: Record<PageKey, {
     title: "中央厂务室",
     eyebrow: "MIRA / CENTRAL OFFICE",
     deck: "今天的生产秩序，由事实与证据负责。",
+  },
+  attention: {
+    path: "/attention",
+    title: "关注与证据",
+    eyebrow: "ACTION DESK / EVIDENCE",
+    deck: "确认阻塞、重新核验、保留未知。没有证据就不叫人工待办。",
   },
   engineering: {
     path: "/engineering",
@@ -83,6 +90,7 @@ const nav = [
 
 function pageKeyForPath(pathname: string): PageKey {
   const normalized = pathname !== "/" ? pathname.replace(/\/+$/, "") : pathname;
+  if (normalized === routes.attention.path) return "attention";
   if (normalized === routes.engineering.path) return "engineering";
   if (normalized === routes.runtime.path) return "runtime";
   if (normalized === routes.governance.path) return "governance";
@@ -263,6 +271,7 @@ export default function App() {
     <Routes>
       <Route element={<ControlLayout />}>
         <Route index element={<Overview />} />
+        <Route path="attention" element={<AttentionDeskPage />} />
         <Route path="engineering" element={<Engineering />} />
         <Route path="runtime" element={<Runtime />} />
         <Route path="governance" element={<Governance />} />

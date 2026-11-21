@@ -11,7 +11,7 @@
 以下“未实施 / 仅设计”等措辞记录起草当日的历史情况，不是当前产品状态。
 
 - OPS-034～037 已在生产，事实契约分别由 docs/github-attention-facts.md、docs/github-attention-gate-status.md、docs/github-attention-pr-status.md、docs/github-attention-worker-status.md 和对应源码负责。
-- OPS-038 由 Issue #109 定义交付和验收；当前改造分支中的 src/attention-center.ts、src/Overview.tsx 将可信候选整理成「需要关注 / 正在推进 / 历史观察 / 数据不足」，不复制资格判定。
+- OPS-038 由 Issue #109 定义交付和验收；当前开发候选由 src/attention-center.ts 复用原有资格；首页 src/Overview.tsx 仅显示部门／专用控制台入口和有界仪表；详细关注记录与按需 PR／Worker 核验迁至 src/AttentionDeskPage.tsx 的 /attention。四类「需要关注 / 正在推进 / 历史观察 / 数据不足」留在证据详情页，避免首页成为九章长报表。
 - 当前仍有边界：必要 GitHub required checks 无可信全面读取；非 Draft Hold 不能自动取证；Worker 当前性由有界 Recovery Pointer 支撑；六仓库 Facts 是每小时缓存、PR 每仓库最多 5 项、Factory Feed 最近最多 12 项。未核验及试点外事项绝不当作已恢复或“0 风险”。
 - 此处标注的 OPS-038 实施状态仅指开发候选；合并、验收和生产发布须另以 PR/CI/运行事实确认。
 

@@ -480,3 +480,18 @@
   .home-pr-row button { min-height: 38px; }
   .home-section-title > span { max-width: 50%; white-space: normal; text-align: right; line-height: 1.5; }
 }
+
+/* OPS-038: The long qualification report has its own route. Home is a doorway. */
+.attention-page-intro { padding: 18px 0 22px; border-bottom: 1px solid var(--line); }
+.attention-back-link { display: inline-flex; align-items: center; color: var(--accent); font-size: 11px; margin-bottom: 17px; }
+.attention-back-link:hover { text-decoration: underline; }
+.attention-page-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
+.attention-page-summary > div { min-width: 0; display: grid; gap: 6px; }
+.attention-page-summary > div > span { font-size: 10px; color: var(--text-soft); }
+.attention-page-summary strong { font-size: 25px; font-weight: 760; font-variant-numeric: tabular-nums; }
+.attention-page-summary strong.attention-coverage-word { font-size: 17px; align-self: center; }
+.attention-page-intro > p { max-width: 720px; color: var(--text-faint); font-size: 11px; line-height: 1.65; margin: 16px 0 0; }
+@media (max-width: 640px) {
+  .attention-page-intro { padding: 13px 0 15px; }
+  .attention-page-summary { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 15px 7px; }
+}
