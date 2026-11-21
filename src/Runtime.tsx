@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { TuiLoading } from "./TuiLoading";
 import {
   Activity, AlertTriangle, CheckCircle2, ChevronDown, Cloud,
   ExternalLink, Package, Radio, Server, ShieldAlert,
@@ -44,12 +45,17 @@ export default function Runtime() {
   ].filter((x): x is string => Boolean(x));
 
   if (!services && !analyticsRead.data && !deployments) {
-    return <section className="page-state" role="status">
-      <Radio size={16} />
-      <div>
-        <strong>{sourceErrors.length ? "运行数据暂时无法读取" : "正在采集设备科数据"}</strong>
-        <small>{sourceErrors.join(" ") || "服务探针、Workers / Pages 和 24 小时流量来源核对中。"}</small>
-      </div>
+    return <section className="page-state">
+      {sourceErrors.length ? (
+        <div role="status"><strong>运行数据暂时无法读取</strong>
+          <small>{sourceErrors.join(" ")}</small></div>
+      ) : (
+        <TuiLoading
+          title="正在采集设备科数据"
+          detail="服务探针、Workers / Pages 与 24 小时流量来源核对中"
+          command="RUNTIME / SCAN"
+        />
+      )}
     </section>;
   }
 

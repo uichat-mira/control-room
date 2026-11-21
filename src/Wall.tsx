@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { TuiLoading } from "./TuiLoading";
 import {
   Activity,
   AlertTriangle,
@@ -45,8 +46,11 @@ export default function Wall() {
     return (
       <main className="shell wall-shell">
         <section className="page-state">
-          <Radio size={16} />
-          <div><strong>Reading Mira System</strong><small>{read.error ?? "Loading operational snapshot."}</small></div>
+          {read.error ? (
+            <div role="status"><strong>Mira System is unavailable</strong><small>{read.error}</small></div>
+          ) : (
+            <TuiLoading title="Reading Mira System" detail="Loading operational snapshot" command="SYSTEM / READ" />
+          )}
         </section>
       </main>
     );
